@@ -7,6 +7,8 @@
     <list default="true" id="0393c75c-e7b1-4b55-9a03-734e0ec812a4" name="Changes" comment="atuo">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/GenerateTradePlan.py" beforeDir="false" afterPath="$PROJECT_DIR$/GenerateTradePlan.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/GetLHB.py" beforeDir="false" afterPath="$PROJECT_DIR$/GetLHB.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/GetTradeDate.py" beforeDir="false" afterPath="$PROJECT_DIR$/GetTradeDate.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/Strategies.py" beforeDir="false" afterPath="$PROJECT_DIR$/Strategies.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/ak.py" beforeDir="false" afterPath="$PROJECT_DIR$/ak.py" afterDir="false" />
     </list>
@@ -39,6 +41,7 @@
   <component name="PropertiesComponent"><![CDATA[{
   "keyToString": {
     "Python.GenerateTradePlan.executor": "Run",
+    "Python.GetLHB (1).executor": "Run",
     "Python.HotSectors.executor": "Run",
     "Python.LHB.executor": "Run",
     "Python.MarketSentiment.executor": "Run",
@@ -70,7 +73,7 @@
     "settings.editor.selected.configurable": "com.jetbrains.python.configuration.PyActiveSdkModuleConfigurable"
   }
 }]]></component>
-  <component name="RunManager" selected="Python.Strategies">
+  <component name="RunManager" selected="Python.main">
     <configuration name="GenerateTradePlan" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
       <module name="TradeModel" />
       <option name="ENV_FILES" value="" />
@@ -93,6 +96,28 @@
       <option name="INPUT_FILE" value="" />
       <method v="2" />
     </configuration>
+    <configuration name="GetLHB (1)" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
+      <module name="TradeModel" />
+      <option name="ENV_FILES" value="" />
+      <option name="INTERPRETER_OPTIONS" value="" />
+      <option name="PARENT_ENVS" value="true" />
+      <envs>
+        <env name="PYTHONUNBUFFERED" value="1" />
+      </envs>
+      <option name="SDK_HOME" value="" />
+      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$" />
+      <option name="IS_MODULE_SDK" value="true" />
+      <option name="ADD_CONTENT_ROOTS" value="true" />
+      <option name="ADD_SOURCE_ROOTS" value="true" />
+      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/GetLHB.py" />
+      <option name="PARAMETERS" value="" />
+      <option name="SHOW_COMMAND_LINE" value="false" />
+      <option name="EMULATE_TERMINAL" value="false" />
+      <option name="MODULE_MODE" value="false" />
+      <option name="REDIRECT_INPUT" value="false" />
+      <option name="INPUT_FILE" value="" />
+      <method v="2" />
+    </configuration>
     <configuration name="GetLHB" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
       <module name="TradeModel" />
       <option name="ENV_FILES" value="" />
@@ -107,28 +132,6 @@
       <option name="ADD_CONTENT_ROOTS" value="true" />
       <option name="ADD_SOURCE_ROOTS" value="true" />
       <option name="SCRIPT_NAME" value="G:\model\TradeModel\GetLHB.py" />
-      <option name="PARAMETERS" value="" />
-      <option name="SHOW_COMMAND_LINE" value="false" />
-      <option name="EMULATE_TERMINAL" value="false" />
-      <option name="MODULE_MODE" value="false" />
-      <option name="REDIRECT_INPUT" value="false" />
-      <option name="INPUT_FILE" value="" />
-      <method v="2" />
-    </configuration>
-    <configuration name="GetTradeDate" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
-      <module name="TradeModel" />
-      <option name="ENV_FILES" value="" />
-      <option name="INTERPRETER_OPTIONS" value="" />
-      <option name="PARENT_ENVS" value="true" />
-      <envs>
-        <env name="PYTHONUNBUFFERED" value="1" />
-      </envs>
-      <option name="SDK_HOME" value="" />
-      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$" />
-      <option name="IS_MODULE_SDK" value="true" />
-      <option name="ADD_CONTENT_ROOTS" value="true" />
-      <option name="ADD_SOURCE_ROOTS" value="true" />
-      <option name="SCRIPT_NAME" value="G:\model\TradeModel\GetTradeDate.py" />
       <option name="PARAMETERS" value="" />
       <option name="SHOW_COMMAND_LINE" value="false" />
       <option name="EMULATE_TERMINAL" value="false" />
@@ -205,11 +208,11 @@
     </configuration>
     <recent_temporary>
       <list>
+        <item itemvalue="Python.GetLHB (1)" />
         <item itemvalue="Python.Strategies" />
         <item itemvalue="Python.Trading" />
         <item itemvalue="Python.GenerateTradePlan" />
         <item itemvalue="Python.GetLHB" />
-        <item itemvalue="Python.GetTradeDate" />
       </list>
     </recent_temporary>
   </component>
@@ -245,7 +248,15 @@
       <option name="project" value="LOCAL" />
       <updated>1743000305279</updated>
     </task>
-    <option name="localTasksCounter" value="3" />
+    <task id="LOCAL-00003" summary="atuo">
+      <option name="closed" value="true" />
+      <created>1743003450729</created>
+      <option name="number" value="00003" />
+      <option name="presentableId" value="LOCAL-00003" />
+      <option name="project" value="LOCAL" />
+      <updated>1743003450729</updated>
+    </task>
+    <option name="localTasksCounter" value="4" />
     <servers />
   </component>
   <component name="VcsManagerConfiguration">

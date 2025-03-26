@@ -182,7 +182,7 @@ class LHBProcessor:
 if __name__ == "__main__":
     processor = LHBProcessor()
     data = processor.get_enhanced_data(
-        dates=['20250321'],
+        dates=['20250326'],
         statistic_period="近一月"
     )
     print(data.head(10))

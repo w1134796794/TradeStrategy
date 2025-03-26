@@ -23,9 +23,9 @@ class TradePlanGenerator:
         self.sector_analyzer = SectorAnalyzer()
         self.lhb_processor = LHBProcessor()
         self.params = {
-            'max_candidates': 8,
-            'min_score': 65,
-            'sector_threshold': 3
+            'max_candidates': int(8),
+            'min_score': int(65),
+            'sector_threshold': int(3)
         }
 
     def generate_daily_plan(self) -> Dict:
@@ -46,7 +46,8 @@ class TradePlanGenerator:
                 return self._generate_empty_plan(plan_date, "无有效涨停数据")
 
             # 步骤4-5
-            candidates = self._generate_candidates(data_pack, market_status)
+            # 修复：移除多余的 market_status 参数
+            candidates = self._generate_candidates(data_pack)
             return self._compile_full_plan(plan_date, candidates, market_status, data_pack)
 
         except Exception as e:
@@ -55,21 +56,32 @@ class TradePlanGenerator:
 
     def _get_trade_dates(self) -> tuple:
         """获取数据日期和计划日期"""
-        if self.is_market_hours():
-            data_date = self.calendar.get_recent_trade_date()
-            plan_date = self.calendar.get_next_trade_date(data_date)
-        else:
-            plan_date = self.calendar.get_next_trade_date()
-            data_date = self.calendar.get_previous_trade_date(plan_date)
+        now = datetime.now()
+        current_date = now.strftime("%Y%m%d")
 
-        logger.info(f"数据日期: {data_date} → 计划日期: {plan_date}")
+        if self.is_market_hours():
+            # 交易时段使用当日数据
+            data_date = self.calendar.get_previous_trade_date(current_date)
+            plan_date = current_date
+        else:
+            # 非交易时段
+            if current_date in self.calendar.sorted_dates:
+                # 当天是交易日，但非交易时段
+                data_date = self.calendar.get_previous_trade_date(current_date)
+                plan_date = current_date
+            else:
+                # 当天非交易日
+                plan_date = self.calendar.get_next_trade_date()
+                data_date = self.calendar.get_previous_trade_date(plan_date)
+
+        logger.info(f"日期获取结果 | 当前时间:{now} 数据日期:{data_date} 计划日期:{plan_date}")
         return data_date, plan_date
 
     def is_market_hours(self):
         """判断当前是否在交易时段内（9:30-15:00）"""
-
         now = datetime.now().time()
-        return (now >= datetime.strptime("09:00", "%H:%M").time() and now <= datetime.strptime("17:00", "%H:%M").time())
+        # 假设交易时段为9:30-15:00
+        return (now >= datetime.strptime("09:30", "%H:%M").time() and now <= datetime.strptime("15:00", "%H:%M").time())
 
     def should_generate_next_day_plan(self):
         """判断是否需要生成次日计划"""
@@ -158,7 +170,6 @@ class TradePlanGenerator:
 
     def _preprocess_zt_data(self, zt_df: pd.DataFrame) -> pd.DataFrame:
         """预处理涨停板数据（修改后）"""
-        # 列名标准化
         zt_df = zt_df.rename(columns={
             '代码': 'code',
             '名称': 'name',
@@ -169,71 +180,99 @@ class TradePlanGenerator:
         # 使用策略类处理连板数和过滤
         filtered = ScoringStrategy.filter_early_boards(zt_df)
 
-        # 类型转换
-        filtered['seal_amount'] = pd.to_numeric(filtered['seal_amount'], errors='coerce').fillna(0)
+        # 强制类型转换（处理异常值）
+        filtered['limit_count'] = (
+            pd.to_numeric(filtered['limit_count'], errors='coerce')
+            .fillna(1)  # 无效值默认1连板
+            .astype(int)
+        )
+
+        filtered['seal_amount'] = (
+            pd.to_numeric(filtered['seal_amount'], errors='coerce')
+            .fillna(0.0)
+            .astype(float)
+        )
+
         return filtered[['code', 'name', 'limit_count', 'seal_amount', 'first_seal_time']]
 
-    def _generate_candidates(self, data_pack: Dict, market_status: Dict) -> pd.DataFrame:
-        """生成候选股列表"""
+    def _generate_candidates(self, data_pack: Dict) -> pd.DataFrame:
+        """候选股生成（参数修复版）"""
         try:
-            # 确保zt_data是DataFrame
-            if not isinstance(data_pack['zt_data'], pd.DataFrame):
-                raise ValueError("涨停数据格式错误")
+            # 确保基础数据存在
+            if 'zt_data' not in data_pack or data_pack['zt_data'].empty:
+                raise ValueError("涨停数据缺失")
 
-            # 将板块映射转换为DataFrame
-            sector_map = self.sector_analyzer.build_sector_map(data_pack['sectors'])
-            sector_df = pd.DataFrame([
-                {'code': code, 'sector': sector[0], 'sector_type': sector[1]}
-                for sector, codes in sector_map.items()
-                for code in codes
-            ])
+            # ========== 处理龙虎榜数据 ==========
+            # 确保有默认值
+            lhb_scores = self._calculate_lhb_scores(data_pack.get('lhb_data', pd.DataFrame()))
+            merged = data_pack['zt_data'].copy()
 
-            # 合并数据
-            merged = data_pack['zt_data'].merge(
-                sector_df,
-                on='code',
-                how='left'
-            )
+            # 添加lhb_score列（带默认值）
+            merged['lhb_score'] = merged['code'].map(lhb_scores).fillna(0.0)
 
-            # 处理龙虎榜数据
-            if not isinstance(data_pack['lhb_data'], pd.DataFrame):
-                merged['lhb_score'] = 0
-            else:
-                lhb_scores = self._calculate_lhb_scores(data_pack['lhb_data'])
-                merged['lhb_score'] = merged['code'].map(lhb_scores).fillna(0)
+            # ========== 类型安全转换 ==========
+            type_conversion = {
+                'limit_count': {'dtype': int, 'default': 1},
+                'seal_amount': {'dtype': float, 'default': 0.0},
+                'lhb_score': {'dtype': float, 'default': 0.0}
+            }
 
-            # 确保数值列是数字类型
-            numeric_cols = ['limit_count', 'seal_amount', 'lhb_score']
-            for col in numeric_cols:
-                if col in merged.columns:
-                    merged[col] = pd.to_numeric(merged[col], errors='coerce').fillna(0)
+            for col, config in type_conversion.items():
+                merged[col] = (
+                    pd.to_numeric(merged[col], errors='coerce')
+                    .fillna(config['default'])
+                    .astype(config['dtype'])
+                )
 
-            # 计算综合评分 - 使用apply传递整个行
+            # ========== 评分计算 ==========
+            # 添加输入验证
+            required_columns = ['limit_count', 'seal_amount', 'lhb_score']
+            if not all(col in merged.columns for col in required_columns):
+                missing = [col for col in required_columns if col not in merged.columns]
+                raise KeyError(f"缺失关键列: {missing}")
+
             merged['total_score'] = merged.apply(
-                lambda x: ScoringStrategy.calculate_total_score(x),
+                lambda x: float(ScoringStrategy.calculate_total_score(x)),
                 axis=1
+            ).clip(0, 100)
+
+            # ========== 最终过滤 ==========
+            # 确保参数类型正确
+            min_score = int(self.params['min_score'])
+            if not pd.api.types.is_numeric_dtype(merged['total_score']):
+                raise TypeError("评分列必须为数值类型")
+
+            return (
+                merged[merged['total_score'] >= min_score]
+                .sort_values('total_score', ascending=False)
+                .head(self.params['max_candidates'])
             )
-
-            # 过滤和排序
-            filtered = merged[
-                merged['total_score'] >= self.params['min_score']
-                ].sort_values('total_score', ascending=False)
-
-            return filtered.head(self.params['max_candidates'])
 
         except Exception as e:
-            logger.error(f"候选股生成失败: {str(e)}", exc_info=True)
+            logger.error(
+                f"候选股生成失败（详细日志）: {str(e)}\n当前列: {merged.columns.tolist() if 'merged' in locals() else '无数据'}")
             return pd.DataFrame()
 
     def _calculate_lhb_scores(self, lhb_data: pd.DataFrame) -> Dict:
-        """计算龙虎榜股票评分"""
+        """计算龙虎榜评分（增强版）"""
         if lhb_data.empty:
             return {}
 
-        scores = (lhb_data.groupby('代码')
-                  .apply(lambda x: x['买入金额'].sum() / (x['卖出金额'].sum() + 1e6) * 100)
-                  .to_dict())
-        return {k: min(v, 100) for k, v in scores.items()}
+        try:
+            # 强制类型转换
+            lhb_data['买入金额'] = pd.to_numeric(lhb_data['买入金额'], errors='coerce').fillna(0)
+            lhb_data['卖出金额'] = pd.to_numeric(lhb_data['卖出金额'], errors='coerce').fillna(0)
+
+            scores = (
+                lhb_data.groupby('代码')
+                .apply(lambda x: (x['买入金额'].sum() / (x['卖出金额'].sum() + 1e-6)) * 100)
+                .to_dict()
+            )
+            return {k: min(float(v), 100) for k, v in scores.items()}
+
+        except Exception as e:
+            logger.error(f"龙虎榜评分计算失败: {str(e)}")
+            return {}
 
     def _compile_full_plan(self, plan_date: str, candidates: pd.DataFrame,
                            market_status: Dict, data_pack: Dict) -> Dict:
