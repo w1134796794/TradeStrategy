@@ -1,7 +1,7 @@
 import akshare as ak
 import pandas as pd
 from typing import List
-from TradeDate import TradeCalendar
+from GetTradeDate import TradeCalendar
 
 pd.set_option("display.max_column", None)
 

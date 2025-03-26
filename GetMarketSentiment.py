@@ -6,7 +6,7 @@ from typing import Dict, Optional
 import logging
 from dataclasses import dataclass
 import time
-from TradeDate import TradeCalendar
+from GetTradeDate import TradeCalendar
 import json
 
 logging.basicConfig(level=logging.INFO)
@@ -412,17 +412,40 @@ class MarketSentimentAnalyzer:
 
         return (max_score + distribution_score) * self.config.limit_weight
 
+    def get_sentiment_label(self, score: float) -> str:
+        """根据评分获取情绪标签"""
+        if score >= 80:
+            return "亢奋"
+        elif score >= 60:
+            return "乐观"
+        elif score >= 40:
+            return "谨慎"
+        else:
+            return "恐慌"
+
     def calculate_total_score(self) -> float:
-        """计算综合情绪得分"""
-        if not all([self._index_data, self._market_breadth, self._limit_stats]):
-            self.collect_market_data()
+        """计算综合情绪评分"""
+        try:
+            breadth = self._market_breadth
+            limit_stats = self._limit_stats
 
-        total = self.config.base_score
-        total += self.calculate_index_score()
-        total += self.calculate_breadth_score()
-        total += self.calculate_limit_score()
+            # 添加空值保护
+            if not breadth or not limit_stats:
+                raise ValueError("市场数据未正确初始化")
 
-        return max(min(total, 100), 0)  # 限制在0-100区间
+            total_rise_fall = breadth.get('rise_num', 0) + breadth.get('fall_num', 0)
+
+            score = 0
+            # 涨停数量贡献（最多40分）
+            score += min(breadth.get('limit_up', 0) * 2, 40)
+            # 上涨比例贡献
+            score += (breadth.get('rise_num', 0) / (total_rise_fall + 1e-6)) * 30
+            # 最高连板数贡献
+            score += min(limit_stats.get('max_limit', 0) * 5, 30)
+            return round(score, 1)
+        except Exception as e:
+            logger.error(f"情绪分计算失败: {str(e)}")
+            return 0.0
 
     def generate_report(self) -> Dict:
         """生成分析报告"""

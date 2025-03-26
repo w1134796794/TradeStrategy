@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Tuple, Dict, Set
 import logging
-from TradeDate import TradeCalendar
+from GetTradeDate import TradeCalendar
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

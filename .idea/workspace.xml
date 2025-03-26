@@ -4,23 +4,17 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="0393c75c-e7b1-4b55-9a03-734e0ec812a4" name="Changes" comment="">
-      <change afterPath="$PROJECT_DIR$/.idea/TradeModel.iml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/inspectionProfiles/Project_Default.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/inspectionProfiles/profiles_settings.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/misc.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/modules.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/vcs.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/HotSectors.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/LHB.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/MarketSentiment.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/TradeDate.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/Trading.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/ak.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/ak_enhance.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/main.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/test.py" afterDir="false" />
+    <list default="true" id="0393c75c-e7b1-4b55-9a03-734e0ec812a4" name="Changes" comment="1">
+      <change afterPath="$PROJECT_DIR$/GenerateTradePlan.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/Strategies.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/HotSectors.py" beforeDir="false" afterPath="$PROJECT_DIR$/GetHotSectors.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/LHB.py" beforeDir="false" afterPath="$PROJECT_DIR$/GetLHB.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/MarketSentiment.py" beforeDir="false" afterPath="$PROJECT_DIR$/GetMarketSentiment.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/TradeDate.py" beforeDir="false" afterPath="$PROJECT_DIR$/GetTradeDate.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/Trading.py" beforeDir="false" afterPath="$PROJECT_DIR$/Trading.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ak.py" beforeDir="false" afterPath="$PROJECT_DIR$/ak.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/main.py" beforeDir="false" afterPath="$PROJECT_DIR$/main.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -48,39 +42,41 @@
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent">{
-  &quot;keyToString&quot;: {
-    &quot;Python.HotSectors.executor&quot;: &quot;Run&quot;,
-    &quot;Python.LHB.executor&quot;: &quot;Run&quot;,
-    &quot;Python.MarketSentiment.executor&quot;: &quot;Run&quot;,
-    &quot;Python.TradeDate.executor&quot;: &quot;Run&quot;,
-    &quot;Python.Trading.executor&quot;: &quot;Run&quot;,
-    &quot;Python.Tushare.executor&quot;: &quot;Run&quot;,
-    &quot;Python.ak.executor&quot;: &quot;Run&quot;,
-    &quot;Python.ak_enhance.executor&quot;: &quot;Run&quot;,
-    &quot;Python.aks.executor&quot;: &quot;Run&quot;,
-    &quot;Python.akshare.executor&quot;: &quot;Run&quot;,
-    &quot;Python.ashare.executor&quot;: &quot;Run&quot;,
-    &quot;Python.getKPLdata.executor&quot;: &quot;Run&quot;,
-    &quot;Python.getLongHuBangData.executor&quot;: &quot;Run&quot;,
-    &quot;Python.get_trade_date.executor&quot;: &quot;Run&quot;,
-    &quot;Python.hot_sectors.executor&quot;: &quot;Run&quot;,
-    &quot;Python.lhb.executor&quot;: &quot;Run&quot;,
-    &quot;Python.lhb_analyze.executor&quot;: &quot;Run&quot;,
-    &quot;Python.test.executor&quot;: &quot;Run&quot;,
-    &quot;Python.ticai.executor&quot;: &quot;Run&quot;,
-    &quot;Python.ticaiDetail.executor&quot;: &quot;Run&quot;,
-    &quot;Python.ts.executor&quot;: &quot;Run&quot;,
-    &quot;RunOnceActivity.OpenProjectViewOnStart&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
-    &quot;git-widget-placeholder&quot;: &quot;master&quot;,
-    &quot;ignore.virus.scanning.warn.message&quot;: &quot;true&quot;,
-    &quot;last_opened_file_path&quot;: &quot;G:/Anaconda3/condabin/conda.bat&quot;,
-    &quot;settings.editor.selected.configurable&quot;: &quot;com.jetbrains.python.configuration.PyActiveSdkModuleConfigurable&quot;
+  <component name="PropertiesComponent"><![CDATA[{
+  "keyToString": {
+    "Python.GenerateTradePlan.executor": "Run",
+    "Python.HotSectors.executor": "Run",
+    "Python.LHB.executor": "Run",
+    "Python.MarketSentiment.executor": "Run",
+    "Python.TradeDate.executor": "Run",
+    "Python.Trading.executor": "Run",
+    "Python.Tushare.executor": "Run",
+    "Python.ak.executor": "Run",
+    "Python.ak_enhance.executor": "Run",
+    "Python.aks.executor": "Run",
+    "Python.akshare.executor": "Run",
+    "Python.ashare.executor": "Run",
+    "Python.getKPLdata.executor": "Run",
+    "Python.getLongHuBangData.executor": "Run",
+    "Python.get_trade_date.executor": "Run",
+    "Python.hot_sectors.executor": "Run",
+    "Python.lhb.executor": "Run",
+    "Python.lhb_analyze.executor": "Run",
+    "Python.main.executor": "Run",
+    "Python.test.executor": "Run",
+    "Python.ticai.executor": "Run",
+    "Python.ticaiDetail.executor": "Run",
+    "Python.ts.executor": "Run",
+    "RunOnceActivity.OpenProjectViewOnStart": "true",
+    "RunOnceActivity.ShowReadmeOnStart": "true",
+    "git-widget-placeholder": "master",
+    "ignore.virus.scanning.warn.message": "true",
+    "last_opened_file_path": "G:/Anaconda3/condabin/conda.bat",
+    "settings.editor.selected.configurable": "com.jetbrains.python.configuration.PyActiveSdkModuleConfigurable"
   }
-}</component>
+}]]></component>
   <component name="RunManager" selected="Python.Trading">
-    <configuration name="LHB" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
+    <configuration name="GenerateTradePlan" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
       <module name="TradeModel" />
       <option name="ENV_FILES" value="" />
       <option name="INTERPRETER_OPTIONS" value="" />
@@ -93,7 +89,7 @@
       <option name="IS_MODULE_SDK" value="true" />
       <option name="ADD_CONTENT_ROOTS" value="true" />
       <option name="ADD_SOURCE_ROOTS" value="true" />
-      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/LHB.py" />
+      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/GenerateTradePlan.py" />
       <option name="PARAMETERS" value="" />
       <option name="SHOW_COMMAND_LINE" value="false" />
       <option name="EMULATE_TERMINAL" value="false" />
@@ -102,7 +98,7 @@
       <option name="INPUT_FILE" value="" />
       <method v="2" />
     </configuration>
-    <configuration name="MarketSentiment" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
+    <configuration name="GetLHB" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
       <module name="TradeModel" />
       <option name="ENV_FILES" value="" />
       <option name="INTERPRETER_OPTIONS" value="" />
@@ -115,7 +111,7 @@
       <option name="IS_MODULE_SDK" value="true" />
       <option name="ADD_CONTENT_ROOTS" value="true" />
       <option name="ADD_SOURCE_ROOTS" value="true" />
-      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/MarketSentiment.py" />
+      <option name="SCRIPT_NAME" value="G:\model\TradeModel\GetLHB.py" />
       <option name="PARAMETERS" value="" />
       <option name="SHOW_COMMAND_LINE" value="false" />
       <option name="EMULATE_TERMINAL" value="false" />
@@ -124,7 +120,7 @@
       <option name="INPUT_FILE" value="" />
       <method v="2" />
     </configuration>
-    <configuration name="TradeDate" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
+    <configuration name="GetMarketSentiment" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
       <module name="TradeModel" />
       <option name="ENV_FILES" value="" />
       <option name="INTERPRETER_OPTIONS" value="" />
@@ -137,7 +133,29 @@
       <option name="IS_MODULE_SDK" value="true" />
       <option name="ADD_CONTENT_ROOTS" value="true" />
       <option name="ADD_SOURCE_ROOTS" value="true" />
-      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/TradeDate.py" />
+      <option name="SCRIPT_NAME" value="G:\model\TradeModel\GetMarketSentiment.py" />
+      <option name="PARAMETERS" value="" />
+      <option name="SHOW_COMMAND_LINE" value="false" />
+      <option name="EMULATE_TERMINAL" value="false" />
+      <option name="MODULE_MODE" value="false" />
+      <option name="REDIRECT_INPUT" value="false" />
+      <option name="INPUT_FILE" value="" />
+      <method v="2" />
+    </configuration>
+    <configuration name="GetTradeDate" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
+      <module name="TradeModel" />
+      <option name="ENV_FILES" value="" />
+      <option name="INTERPRETER_OPTIONS" value="" />
+      <option name="PARENT_ENVS" value="true" />
+      <envs>
+        <env name="PYTHONUNBUFFERED" value="1" />
+      </envs>
+      <option name="SDK_HOME" value="" />
+      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$" />
+      <option name="IS_MODULE_SDK" value="true" />
+      <option name="ADD_CONTENT_ROOTS" value="true" />
+      <option name="ADD_SOURCE_ROOTS" value="true" />
+      <option name="SCRIPT_NAME" value="G:\model\TradeModel\GetTradeDate.py" />
       <option name="PARAMETERS" value="" />
       <option name="SHOW_COMMAND_LINE" value="false" />
       <option name="EMULATE_TERMINAL" value="false" />
@@ -190,35 +208,13 @@
       <option name="INPUT_FILE" value="" />
       <method v="2" />
     </configuration>
-    <configuration name="test" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
-      <module name="TradeModel" />
-      <option name="ENV_FILES" value="" />
-      <option name="INTERPRETER_OPTIONS" value="" />
-      <option name="PARENT_ENVS" value="true" />
-      <envs>
-        <env name="PYTHONUNBUFFERED" value="1" />
-      </envs>
-      <option name="SDK_HOME" value="" />
-      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$" />
-      <option name="IS_MODULE_SDK" value="true" />
-      <option name="ADD_CONTENT_ROOTS" value="true" />
-      <option name="ADD_SOURCE_ROOTS" value="true" />
-      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/test.py" />
-      <option name="PARAMETERS" value="" />
-      <option name="SHOW_COMMAND_LINE" value="false" />
-      <option name="EMULATE_TERMINAL" value="false" />
-      <option name="MODULE_MODE" value="false" />
-      <option name="REDIRECT_INPUT" value="false" />
-      <option name="INPUT_FILE" value="" />
-      <method v="2" />
-    </configuration>
     <recent_temporary>
       <list>
         <item itemvalue="Python.Trading" />
-        <item itemvalue="Python.LHB" />
-        <item itemvalue="Python.TradeDate" />
-        <item itemvalue="Python.MarketSentiment" />
-        <item itemvalue="Python.test" />
+        <item itemvalue="Python.GenerateTradePlan" />
+        <item itemvalue="Python.GetLHB" />
+        <item itemvalue="Python.GetTradeDate" />
+        <item itemvalue="Python.GetMarketSentiment" />
       </list>
     </recent_temporary>
   </component>
@@ -238,6 +234,19 @@
       <option name="presentableId" value="Default" />
       <updated>1729323980932</updated>
     </task>
+    <task id="LOCAL-00001" summary="1">
+      <option name="closed" value="true" />
+      <created>1742993628123</created>
+      <option name="number" value="00001" />
+      <option name="presentableId" value="LOCAL-00001" />
+      <option name="project" value="LOCAL" />
+      <updated>1742993628123</updated>
+    </task>
+    <option name="localTasksCounter" value="2" />
     <servers />
+  </component>
+  <component name="VcsManagerConfiguration">
+    <MESSAGE value="1" />
+    <option name="LAST_COMMIT_MESSAGE" value="1" />
   </component>
 </project>

@@ -6,28 +6,15 @@ import bisect  # 添加bisect模块
 
 
 class TradeCalendar:
-
+    """
+    获取最近的交易日：get_recent_trade_date
+    获取前N个交易日,默认前一个交易日：get_previous_trade_date
+    获取下一个交易日：get_next_trade_date
+    """
     def __init__(self):
         self.trade_dates = self._load_trade_dates()
         # 将日期转换为排序后的列表（升序）
         self.sorted_dates = sorted(self.trade_dates) if self.trade_dates else []
-
-    def is_market_hours(self):
-        """判断当前是否在交易时段内（9:30-15:00）"""
-
-        now = datetime.now().time()
-        return (now >= datetime.strptime("09:00", "%H:%M").time() and now <= datetime.strptime("17:00", "%H:%M").time())
-
-    def should_generate_next_day_plan(self):
-        """判断是否需要生成次日计划"""
-        now = datetime.now()
-        current_time = now.time()
-        # 条件1：交易时段外（15:00后）
-        # 条件2：周末且周五收盘后
-        return (
-                (not self.is_market_hours()) or
-                (now.weekday() >= 5)  # 周六/周日
-        )
 
     def is_trade_date(self, date_str: str) -> bool:
         """
@@ -182,8 +169,4 @@ if __name__ == "__main__":
 
     calendar = TradeCalendar()
 
-    # 测试案例1：正常情况
-    print(calendar.get_recent_trade_date())
-
-    print(calendar.should_generate_next_day_plan())
 

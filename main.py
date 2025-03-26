@@ -1,16 +1,15 @@
-# This is a sample Python script.
+from GenerateTradePlan import TradePlanGenerator
 
-# Press Shift+F10 to execute it or replace it with your code.
-# Press Double Shift to search everywhere for classes, files, tool windows, actions, and settings.
+if __name__ == "__main__":
+    generator = TradePlanGenerator()
+    plan = generator.generate_daily_plan()
 
+    print(f"== 交易计划 {plan['plan_date']} ==")
+    print(f"市场状态: {plan['market_status']['level']} ({plan['market_status']['score']}分)")
+    print(f"风险提示: {plan['risk_assessment']}")
 
-def print_hi(name):
-    # Use a breakpoint in the code line below to debug your script.
-    print(f'Hi, {name}')  # Press Ctrl+F8 to toggle the breakpoint.
-
-
-# Press the green button in the gutter to run the script.
-if __name__ == '__main__':
-    print_hi('PyCharm')
-
-# See PyCharm help at https://www.jetbrains.com/help/pycharm/
+    print("\n推荐标的:")
+    for stock in plan['candidates']:
+        print(f"{stock['name']}({stock['code']}) | 评分: {stock['score']} | 建议仓位: {stock['position']}%")
+        print(f"　　入场价: ¥{stock['entry_price']:.2f} | 止损价: ¥{stock['stop_loss']:.2f}")
+        print(f"　　推荐理由: {stock['reasons']}")
