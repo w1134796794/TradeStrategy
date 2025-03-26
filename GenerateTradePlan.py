@@ -7,10 +7,8 @@ from GetMarketSentiment import MarketSentimentAnalyzer
 from GetHotSectors import SectorAnalyzer
 from GetTradeDate import TradeCalendar
 from Strategies import ScoringStrategy, PositionStrategy, RiskControlStrategy
-import re
 from typing import List, Tuple, Dict, Set
 import akshare as ak
-
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -32,32 +30,27 @@ class TradePlanGenerator:
 
     def generate_daily_plan(self) -> Dict:
         """生成完整交易计划"""
+        plan_date = datetime.now().strftime("%Y%m%d")
         try:
             # 步骤1：获取交易日期
             data_date, plan_date = self._get_trade_dates()
 
             # 步骤2：市场分析
             market_status = self._analyze_market(data_date)
-            if not market_status['tradeable']:
-                return self._generate_empty_plan(plan_date, market_status['message'])
+            if not market_status.get('tradeable', False):
+                return self._generate_empty_plan(plan_date, market_status.get('message', "暂停交易"))
 
             # 步骤3：数据收集
             data_pack = self._collect_market_data(data_date)
+            if data_pack['zt_data'].empty:
+                return self._generate_empty_plan(plan_date, "无有效涨停数据")
 
-            # 步骤4：候选股生成
+            # 步骤4-5
             candidates = self._generate_candidates(data_pack, market_status)
-
-            # 步骤5：生成最终计划
-            return self._compile_full_plan(
-                plan_date=plan_date,
-                candidates=candidates,
-                market_status=market_status,
-                data_pack=data_pack
-            )
+            return self._compile_full_plan(plan_date, candidates, market_status, data_pack)
 
         except Exception as e:
             logger.error(f"计划生成失败: {str(e)}", exc_info=True)
-            # 修正参数为message字符串
             return self._generate_empty_plan(plan_date, f"系统异常: {str(e)}")
 
     def _get_trade_dates(self) -> tuple:
@@ -122,7 +115,7 @@ class TradePlanGenerator:
             }
 
     def _collect_market_data(self, data_date: str) -> Dict:
-        """并行收集市场数据（增强空值处理）"""
+        """并行收集市场数据（确保返回正确类型）"""
         from concurrent.futures import as_completed
 
         results = {
@@ -141,18 +134,16 @@ class TradePlanGenerator:
             for future in as_completed(futures):
                 key = futures[future]
                 try:
-                    results[key] = future.result()
+                    result = future.result()
+                    # 类型转换保证
+                    if key == 'sectors' and isinstance(result, pd.DataFrame):
+                        results[key] = result.to_dict('records')
+                    elif key != 'sectors' and not isinstance(result, pd.DataFrame):
+                        results[key] = pd.DataFrame(result)
+                    else:
+                        results[key] = result
                 except Exception as e:
                     logger.error(f"{key}数据采集失败: {str(e)}")
-                    # 设置默认空值
-                    if key == 'sectors':
-                        results[key] = []
-                    else:
-                        results[key] = pd.DataFrame()
-
-        # 数据完整性检查
-        if results['zt_data'].empty:
-            raise ValueError("涨停数据为空，无法生成计划")
 
         return results
 
@@ -166,7 +157,7 @@ class TradePlanGenerator:
             return pd.DataFrame()
 
     def _preprocess_zt_data(self, zt_df: pd.DataFrame) -> pd.DataFrame:
-        """预处理涨停板数据"""
+        """预处理涨停板数据（修改后）"""
         # 列名标准化
         zt_df = zt_df.rename(columns={
             '代码': 'code',
@@ -175,36 +166,64 @@ class TradePlanGenerator:
             '首次封板时间': 'first_seal_time'
         })
 
-        # 连板数解析
-        zt_df['limit_count'] = zt_df['涨停统计'].apply(
-            lambda x: int(re.search(r'(\d+)连板', x).group(1)) if re.search(r'连板', x) else 1
-        )
-
-        # 过滤非首板/二板
-        filtered = zt_df[zt_df['limit_count'].isin([1, 2])].copy()
+        # 使用策略类处理连板数和过滤
+        filtered = ScoringStrategy.filter_early_boards(zt_df)
 
         # 类型转换
-        filtered['seal_amount'] = pd.to_numeric(filtered['seal_amount'], errors='coerce')
+        filtered['seal_amount'] = pd.to_numeric(filtered['seal_amount'], errors='coerce').fillna(0)
         return filtered[['code', 'name', 'limit_count', 'seal_amount', 'first_seal_time']]
 
     def _generate_candidates(self, data_pack: Dict, market_status: Dict) -> pd.DataFrame:
         """生成候选股列表"""
-        # 合并板块数据
-        sector_map = self.sector_analyzer.build_sector_map(data_pack['sectors'])
-        merged = data_pack['zt_data'].merge(
-            sector_map, left_on='code', right_index=True, how='left'
-        )
+        try:
+            # 确保zt_data是DataFrame
+            if not isinstance(data_pack['zt_data'], pd.DataFrame):
+                raise ValueError("涨停数据格式错误")
 
-        # 合并龙虎榜数据
-        lhb_scores = self._calculate_lhb_scores(data_pack['lhb_data'])
-        merged['lhb_score'] = merged['code'].map(lhb_scores)
+            # 将板块映射转换为DataFrame
+            sector_map = self.sector_analyzer.build_sector_map(data_pack['sectors'])
+            sector_df = pd.DataFrame([
+                {'code': code, 'sector': sector[0], 'sector_type': sector[1]}
+                for sector, codes in sector_map.items()
+                for code in codes
+            ])
 
-        # 计算综合评分
-        merged['total_score'] = merged.apply(ScoringStrategy.calculate_total_score, axis=1)
+            # 合并数据
+            merged = data_pack['zt_data'].merge(
+                sector_df,
+                on='code',
+                how='left'
+            )
 
-        # 过滤和排序
-        filtered = merged[merged['total_score'] >= self.params['min_score']]
-        return filtered.sort_values('total_score', ascending=False).head(self.params['max_candidates'])
+            # 处理龙虎榜数据
+            if not isinstance(data_pack['lhb_data'], pd.DataFrame):
+                merged['lhb_score'] = 0
+            else:
+                lhb_scores = self._calculate_lhb_scores(data_pack['lhb_data'])
+                merged['lhb_score'] = merged['code'].map(lhb_scores).fillna(0)
+
+            # 确保数值列是数字类型
+            numeric_cols = ['limit_count', 'seal_amount', 'lhb_score']
+            for col in numeric_cols:
+                if col in merged.columns:
+                    merged[col] = pd.to_numeric(merged[col], errors='coerce').fillna(0)
+
+            # 计算综合评分 - 使用apply传递整个行
+            merged['total_score'] = merged.apply(
+                lambda x: ScoringStrategy.calculate_total_score(x),
+                axis=1
+            )
+
+            # 过滤和排序
+            filtered = merged[
+                merged['total_score'] >= self.params['min_score']
+                ].sort_values('total_score', ascending=False)
+
+            return filtered.head(self.params['max_candidates'])
+
+        except Exception as e:
+            logger.error(f"候选股生成失败: {str(e)}", exc_info=True)
+            return pd.DataFrame()
 
     def _calculate_lhb_scores(self, lhb_data: pd.DataFrame) -> Dict:
         """计算龙虎榜股票评分"""
@@ -218,24 +237,52 @@ class TradePlanGenerator:
 
     def _compile_full_plan(self, plan_date: str, candidates: pd.DataFrame,
                            market_status: Dict, data_pack: Dict) -> Dict:
-        """编译完整交易计划"""
-        return {
+        """编译完整交易计划（确保所有字段存在）"""
+        plan = {
             'plan_date': plan_date,
             'market_status': self._format_market(market_status),
-            'risk_assessment': self._assess_risks(market_status, data_pack),
-            'candidates': self._format_candidates(candidates, market_status),
-            'sector_analysis': self._analyze_sectors(data_pack['sectors']),
-            'lhb_insights': self._extract_lhb_insights(data_pack['lhb_data'])
+            'risk_assessment': {
+                'market_risk': 'unknown',
+                'sector_risk': 'unknown',
+                'liquidity_risk': 'unknown'
+            },
+            'candidates': [],
+            'sector_analysis': [],
+            'lhb_insights': {}
         }
+
+        try:
+            # 填充风险数据
+            plan['risk_assessment'] = {
+                'market_risk': RiskControlStrategy.check_market_risk(market_status),
+                'sector_risk': self._check_sector_risk(data_pack.get('sectors', [])),
+                'liquidity_risk': self._check_liquidity(data_pack.get('lhb_data', pd.DataFrame()))
+            }
+
+            # 填充候选股数据
+            if not candidates.empty:
+                plan['candidates'] = self._format_candidates(candidates, market_status)
+
+            # 填充板块分析
+            plan['sector_analysis'] = self._analyze_sectors(data_pack.get('sectors', []))
+
+            # 填充龙虎榜数据
+            if 'lhb_data' in data_pack and not data_pack['lhb_data'].empty:
+                plan['lhb_insights'] = self._extract_lhb_insights(data_pack['lhb_data'])
+
+        except Exception as e:
+            logger.error(f"计划编译异常: {str(e)}")
+
+        return plan
 
     def _format_market(self, status: Dict) -> Dict:
         """格式化市场状态数据"""
         return {
             'score': status['score'],
             'level': status['level'],
-            'limit_up': self.market_analyzer.market_breadth.get('limit_up', 0),
-            'limit_down': self.market_analyzer.market_breadth.get('limit_down', 0),
-            'max_limit': self.market_analyzer.limit_stats.get('max_limit', 0)
+            'limit_up': status.get('limit_up', 0),
+            'limit_down': status.get('limit_down', 0),
+            'max_limit': status.get('max_limit', 0)
         }
 
     def _assess_risks(self, market_status: Dict, data_pack: Dict) -> Dict:
@@ -328,15 +375,22 @@ class TradePlanGenerator:
             .apply(lambda x: x['买入金额'].sum() - x['卖出金额'].sum(), axis=1).sum()
         }
 
-    def _generate_empty_plan(self, plan_date: str, message: str) -> dict:
-        """安全的空计划生成（修正参数类型问题）"""
+    def _generate_empty_plan(self, plan_date: str, message: str) -> Dict:
+        """生成安全的空计划模板"""
         return {
             'plan_date': plan_date,
             'market_status': {
                 'score': 0,
-                'level': '异常' if message != "系统异常" else '暂停交易',
+                'level': '异常',
                 'message': message,
                 'tradeable': False
             },
-            'candidates': []
+            'risk_assessment': {
+                'market_risk': 'unknown',
+                'sector_risk': 'unknown',
+                'liquidity_risk': 'unknown'
+            },
+            'candidates': [],
+            'sector_analysis': [],
+            'lhb_insights': {}
         }
