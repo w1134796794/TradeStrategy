@@ -263,12 +263,13 @@ class TradePlanGenerator:
             lhb_data['买入金额'] = pd.to_numeric(lhb_data['买入金额'], errors='coerce').fillna(0)
             lhb_data['卖出金额'] = pd.to_numeric(lhb_data['卖出金额'], errors='coerce').fillna(0)
 
-            scores = (
-                lhb_data.groupby('代码')
-                .apply(lambda x: (x['买入金额'].sum() / (x['卖出金额'].sum() + 1e-6)) * 100)
-                .to_dict()
-            )
-            return {k: min(float(v), 100) for k, v in scores.items()}
+            scores = {}
+            for code, group in lhb_data.groupby('代码'):
+                buy_sum = group['买入金额'].sum()
+                sell_sum = group['卖出金额'].sum()
+                score = (buy_sum / (sell_sum + 1e-6)) * 100
+                scores[code] = min(float(score), 100.0)
+            return scores
 
         except Exception as e:
             logger.error(f"龙虎榜评分计算失败: {str(e)}")
@@ -339,11 +340,17 @@ class TradePlanGenerator:
 
     def _check_liquidity(self, lhb_data: pd.DataFrame) -> str:
         """流动性风险评估"""
-        if lhb_data.empty:
+        if lhb_data.empty or '买入金额' not in lhb_data.columns or '卖出金额' not in lhb_data.columns:
             return 'unknown'
-
-        buy_ratio = lhb_data['买入金额'].sum() / (lhb_data['卖出金额'].sum() + 1e6)
-        return 'good' if buy_ratio > 1.2 else 'normal' if buy_ratio > 0.8 else 'poor'
+        try:
+            # 强制类型转换并求和
+            buy = pd.to_numeric(lhb_data['买入金额'], errors='coerce').fillna(0).sum()
+            sell = pd.to_numeric(lhb_data['卖出金额'], errors='coerce').fillna(0).sum()
+            buy_ratio = buy / (sell + 1e-6)
+            return 'good' if buy_ratio > 1.2 else 'normal' if buy_ratio > 0.8 else 'poor'
+        except Exception as e:
+            logger.error(f"流动性评估异常: {str(e)}")
+            return 'unknown'
 
     def _format_candidates(self, candidates: pd.DataFrame, market_status: Dict) -> List[Dict]:
         """格式化候选股信息"""
@@ -395,23 +402,25 @@ class TradePlanGenerator:
             'name': s[0],
             'type': s[1],
             'momentum': s[2],
-            'leader': self._get_sector_leader(s[0])
+            'leader': self.sector_analyzer._get_sector_leader(s[0])
         } for s in sectors[:5]]
 
-    def _get_sector_leader(self, sector: str) -> str:
-        """获取板块龙头股"""
-        # 此处需要接入板块成分股数据
-        return "待实现"
 
     def _extract_lhb_insights(self, lhb_data: pd.DataFrame) -> Dict:
         """提取龙虎榜洞见"""
         if lhb_data.empty:
             return {}
 
+            # 修正机构净买入计算逻辑
+        institution_df = lhb_data[lhb_data['营业部名称'].str.contains('机构')]
+        institution_net = (
+                institution_df['买入金额'].sum() -
+                institution_df['卖出金额'].sum()
+        )
+
         return {
             'top_buyers': lhb_data.groupby('营业部名称')['买入金额'].sum().nlargest(3).to_dict(),
-            'institution_net': lhb_data[lhb_data['营业部名称'].str.contains('机构')]
-            .apply(lambda x: x['买入金额'].sum() - x['卖出金额'].sum(), axis=1).sum()
+            'institution_net': institution_net
         }
 
     def _generate_empty_plan(self, plan_date: str, message: str) -> Dict:
