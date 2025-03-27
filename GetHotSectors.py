@@ -158,9 +158,11 @@ class SectorAnalyzer:
             # 按分数降序排列
             final_df = combined.sort_values('score', ascending=False)
             self.hot_sectors = [
-                (row['name'], row['type']) for _, row in final_df.iterrows()
+                (row['name'], row['type'], float(row['score']))  # 添加得分并确保为浮点数
+                for _, row in final_df.iterrows()
             ]
             return self.hot_sectors
+
         except Exception as e:
             logger.error(f"获取热门板块失败: {str(e)}", exc_info=True)
             return []
@@ -208,10 +210,10 @@ class SectorAnalyzer:
         failed_sectors = []
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            # 使用传入的 hot_sectors 而非 self.hot_sectors
+            # 修改点：遍历时解包三个参数，忽略第三个得分参数
             futures = {
                 executor.submit(self._get_sector_components, name, sector_type): (name, sector_type)
-                for name, sector_type in hot_sectors  # 遍历传入的热门板块
+                for name, sector_type, _ in hot_sectors  # 关键修复：添加 _, 解包三个参数
             }
 
             # 处理完成的任务
