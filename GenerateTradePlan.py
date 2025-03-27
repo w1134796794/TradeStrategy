@@ -334,7 +334,7 @@ class TradePlanGenerator:
 
     def _check_sector_risk(self, sectors: List) -> str:
         """板块过热风险评估"""
-        hot_count = sum(1 for s in sectors if s[1] > 80)
+        hot_count = sum(1 for s in sectors if s[2] > 80)  # s[2] 对应得分
         return 'high' if hot_count > 3 else 'medium' if hot_count > 1 else 'low'
 
     def _check_liquidity(self, lhb_data: pd.DataFrame) -> str:
