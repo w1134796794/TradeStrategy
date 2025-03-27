@@ -92,7 +92,7 @@ class TradeCalendar:
 
         index = bisect.bisect_left(self.sorted_dates, base_date)
         if index > 0:
-            return self.sorted_dates[index - 1]
+            return self.sorted_dates[index - days]
         return None
 
     def get_trade_days(self, start_date: str, end_date: str) -> list:
