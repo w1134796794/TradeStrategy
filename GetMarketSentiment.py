@@ -7,7 +7,6 @@ import logging
 from dataclasses import dataclass
 import time
 from GetTradeDate import TradeCalendar
-import json
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -240,6 +239,7 @@ class MarketSentimentAnalyzer:
             try:
                 df = self._safe_api_call(ak.stock_zh_index_daily, symbol=index_code)
                 if df.empty:
+                    logger.warning(f"指数{index_code}数据为空")
                     continue
 
                 # 计算技术指标
@@ -271,7 +271,7 @@ class MarketSentimentAnalyzer:
                 'limit_down': ('真实跌停', int)
             }
 
-            result = {}
+            result = {k: 0 for k in breadth_items.keys()}
             for key, (name, dtype) in breadth_items.items():
                 try:
                     value = df[df['item'] == name]['value'].iloc[0]
@@ -449,6 +449,9 @@ class MarketSentimentAnalyzer:
 
     def generate_report(self) -> Dict:
         """生成分析报告"""
+        # 确保数据被收集
+        self.collect_market_data()
+
         score = self.calculate_total_score()
 
         return {
@@ -514,35 +517,89 @@ class MarketSentimentAnalyzer:
         else:
             return "悲观"
 
-    def analyze_premium_effect(self, days=30):
+    def analyze_premium_effect(self, days=5):
         """
         分析首板次日的溢价效应
         :return: 近期首板次日平均溢价率
         """
         try:
-            # 获取历史首板数据
-            start_date = self.calendar.get_previous_trade_date(self.trade_date, days)
-            zt_df = ak.stock_zt_pool_em(start_date)
-
-            # 筛选首板
-            first_zt = zt_df[zt_df['连板数'] == 1]
-
-            # 获取次日开盘价
             premiums = []
-            for _, row in first_zt.iterrows():
-                next_date = self.calendar.get_next_trade_date(row['日期'])
-                if next_date:
-                    day_kline = ak.stock_zh_a_hist(symbol=row['代码'], period='daily',
-                                                   start_date=next_date, end_date=next_date)
-                    if not day_kline.empty:
-                        open_pct = (day_kline.iloc[0]['开盘'] / row['收盘价'] - 1) * 100
-                        premiums.append(open_pct)
+            # 获取起始日期：调整为前days个交易日
+            start_date = self.calendar.get_previous_trade_date(self.trade_date, days)
+            current_date = start_date
 
-            return sum(premiums) / len(premiums) if premiums else 0
+            logger.info(f"分析起始日期: {current_date}, 共分析{days}个交易日")
+
+            for _ in range(days):
+                if not current_date:
+                    logger.warning("遇到无效日期，终止循环")
+                    break
+
+                # 获取涨停数据
+                zt_df = ak.stock_zt_pool_em(date=current_date)
+
+                # 筛选首板
+                first_zt = zt_df[zt_df['连板数'] == 1]
+                if first_zt.empty:
+                    logger.info(f"{current_date}无首板股票")
+                    current_date = self.calendar.get_next_trade_date(current_date)
+                    continue
+
+                # 获取下一交易日
+                next_date = self.calendar.get_next_trade_date(current_date)
+                if not next_date:
+                    logger.info(f"{current_date}后无有效交易日")
+                    current_date = self.calendar.get_next_trade_date(current_date)
+                    continue
+
+                logger.debug(f"处理日期: {current_date} -> {next_date}")
+
+                # 遍历首板股票
+                for _, row in first_zt.iterrows():
+                    code = row['代码']
+                    close_price = row['最新价']
+
+                    # 跳过无效收盘价
+                    if close_price <= 0:
+                        logger.warning(f"股票{code}收盘价异常: {close_price}")
+                        continue
+
+                    try:
+                        # 获取次日K线
+                        day_kline = ak.stock_zh_a_hist(
+                            symbol=code,
+                            period="daily",
+                            start_date=next_date,
+                            end_date=next_date
+                        )
+                        if day_kline.empty:
+                            logger.warning(f"股票{code}在{next_date}无数据")
+                            continue
+
+                        # 提取开盘价
+                        open_price = day_kline.iloc[0]['开盘']
+                        open_pct = (open_price / close_price - 1) * 100
+                        premiums.append(open_pct)
+                        logger.debug(f"股票{code}溢价率: {open_pct:.2f}%")
+
+                    except Exception as e:
+                        logger.error(f"处理股票{code}失败: {str(e)}")
+
+                # 更新当前日期
+                current_date = self.calendar.get_next_trade_date(current_date)
+
+            # 计算平均溢价率
+            if not premiums:
+                logger.warning("无有效溢价率数据")
+                return 0.0
+
+            avg_premium = sum(premiums) / len(premiums)
+            logger.info(f"平均溢价率: {avg_premium:.2f}% (样本数: {len(premiums)})")
+            return round(avg_premium, 2)
 
         except Exception as e:
-            logger.error(f"溢价分析失败: {str(e)}")
-            return 0
+            logger.error(f"溢价分析失败: {str(e)}", exc_info=True)
+            return 0.0
 
 # 使用示例
 if __name__ == "__main__":
@@ -550,16 +607,19 @@ if __name__ == "__main__":
     analyzer = MarketSentimentAnalyzer()
     report = analyzer.generate_report()
 
-    print(f"最高连板数: {report['市场数据']['涨停分析']['最高连板数']}")
-    print("连板分布:")
-    for k, v in report['市场数据']['涨停分析']['连板分布'].items():
-        print(f"  {k}: {v}家")
+    # print(f"最高连板数: {report['市场数据']['涨停分析']['最高连板数']}")
+    # print("连板分布:")
+    # for k, v in report['市场数据']['涨停分析']['连板分布'].items():
+    #     print(f"  {k}: {v}家")
+    #
+    # if report['市场数据']['涨停分析']['特殊涨停案例']:
+    #     print("\n📌 非连续涨停案例:")
+    #     for case in report['市场数据']['涨停分析']['特殊涨停案例']:
+    #         print(f"  - {case}")
+    #
+    # extreme_data = analyzer.detect_extreme_boards()
+    # print(f"检测到天地板：{extreme_data['sky_earth']}例，地天板：{extreme_data['earth_sky']}例")
+    # print(json.dumps(extreme_data['details'], indent=4, ensure_ascii=False))
 
-    if report['市场数据']['涨停分析']['特殊涨停案例']:
-        print("\n📌 非连续涨停案例:")
-        for case in report['市场数据']['涨停分析']['特殊涨停案例']:
-            print(f"  - {case}")
-
-    extreme_data = analyzer.detect_extreme_boards()
-    print(f"检测到天地板：{extreme_data['sky_earth']}例，地天板：{extreme_data['earth_sky']}例")
-    print(json.dumps(extreme_data['details'], indent=4, ensure_ascii=False))
+    premium_effect = analyzer.analyze_premium_effect()
+    print(f"近期首板次日平均溢价率: {premium_effect:.2f}%")
