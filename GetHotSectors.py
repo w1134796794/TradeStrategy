@@ -23,6 +23,7 @@ class SectorAnalyzer:
         self.trade_date = trade_date or self._get_recent_trade_date()
         self.sector_stocks_map: Dict[Tuple[str, str], Set[str]] = {}
         self.hot_sectors: List[Tuple[str, str]] = []
+        self.sector_type_map = {}
 
     def _get_start_date(self, days: int) -> str:
         """获取days个交易日前的日期"""
@@ -126,7 +127,7 @@ class SectorAnalyzer:
             logger.error(f"获取{sector_type}板块列表失败: {str(e)}")
             return []
 
-    def get_hot_sectors(self, days: int = 2, top_n_per_type: int = 5) -> List[Tuple[str, str]]:
+    def get_hot_sectors(self, days: int = 2, top_n_per_type: int = 5) -> List[Tuple[str, str, float]]:
         """获取热门板块排行（行业+概念各取前N）"""
         try:
             # 并行获取行业和概念数据
@@ -158,9 +159,12 @@ class SectorAnalyzer:
             # 按分数降序排列
             final_df = combined.sort_values('score', ascending=False)
             self.hot_sectors = [
-                (row['name'], row['type'], float(row['score']))  # 添加得分并确保为浮点数
+                (row['name'], row['type'], float(row['score']))
                 for _, row in final_df.iterrows()
             ]
+            # 动态填充 sector_type_map
+            for name, sector_type, _ in self.hot_sectors:
+                self.sector_type_map[name] = sector_type
             return self.hot_sectors
 
         except Exception as e:
@@ -314,7 +318,7 @@ class SectorAnalyzer:
 
 # 使用示例
 if __name__ == "__main__":
-    analyzer = SectorAnalyzer(trade_date="20250307")
+    analyzer = SectorAnalyzer(trade_date="20250327")
 
     # 获取近2日热门板块前5
     hot_sectors = analyzer.get_hot_sectors(days=2, top_n_per_type=5)
@@ -325,10 +329,11 @@ if __name__ == "__main__":
 
     # 假设有涨停板数据
     zt_data = pd.DataFrame({
-        'code': ['300248', '000903'],
-        'name': ['新开普', '云内动力']
+        'code': ['605588'],
+        'name': ['冠石科技']
     })
 
     # 增强分析
     enhanced_df = analyzer.enhance_analysis(zt_data)
     print(enhanced_df[['code', 'name', 'hot_sectors']])
+
