@@ -24,6 +24,18 @@ class SectorAnalyzer:
         self.sector_stocks_map: Dict[Tuple[str, str], Set[str]] = {}
         self.hot_sectors: List[Tuple[str, str]] = []
         self.sector_type_map = {}
+        self.config = {
+            'days': 3,  # 评估周期
+            'index_code': 'sh000001',  # 大盘指数代码
+            'net_inflow_threshold': 5e7,  # 大单净流入阈值(元)
+            'fast_limit_hour': 10,  # 快速涨停时间阈值(小时)
+            'weights': {  # 指标权重
+                'recent_gain': 0.4,
+                'resist_market': 0.3,
+                'big_order': 0.2,
+                'fast_limit': 0.1
+            }
+        }
 
     def _get_start_date(self, days: int) -> str:
         """获取days个交易日前的日期"""
@@ -316,9 +328,189 @@ class SectorAnalyzer:
             logger.error(f"板块[{sector}]动量计算失败: {str(e)}")
             return 0
 
+    def get_sector_dragons(self, sector: str, sector_type: str) -> List[Dict]:
+        """获取板块龙一到龙五"""
+        # 获取成分股
+        components = self._get_sector_components(sector, sector_type)
+
+        # 获取个股多维数据
+        stock_data = self._collect_stock_data(list(components)[:50])  # 限制前50只
+
+        # 获取大盘数据
+        index_data = ak.stock_zh_index_daily(symbol=self.config['index_code'])
+
+        # 计算评分
+        scored_stocks = []
+        for code, data in stock_data.items():
+            score = self._calculate_stock_score(data, index_data)
+            scored_stocks.append({**data, **score})
+
+        # 排序返回前五
+        df = pd.DataFrame(scored_stocks)
+        if df.empty:
+            return []
+
+        return df.sort_values('total_score', ascending=False).head(5).to_dict('records')
+
+    def _collect_stock_data(self, codes: List[str]) -> Dict:
+        """批量获取股票多维数据"""
+        stock_data = {}
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            futures = {executor.submit(self._get_single_data, code): code for code in codes}
+            for future in as_completed(futures):
+                code = futures[future]
+                try:
+                    data = future.result(timeout=30)
+                    if data:
+                        stock_data[code] = data
+                except Exception as e:
+                    logger.error(f"股票{code}数据获取失败: {str(e)}")
+        return stock_data
+
+    def _get_single_data(self, code: str) -> Dict:
+        """获取单只股票数据（增强类型检查和异常处理）"""
+        try:
+            # ==== 获取全市场实时数据 ====
+            spot_df = ak.stock_zh_a_spot_em()
+            stock_spot = spot_df[spot_df['代码'] == code]
+            if stock_spot.empty:
+                logger.warning(f"股票{code}未找到实时数据")
+                return None
+
+            # ==== 处理市值字段（兼容不同类型）====
+            market_cap_value = stock_spot['总市值'].iloc[0]
+            if isinstance(market_cap_value, str):
+                # 处理字符串格式（如"100.5亿"）
+                market_cap = float(market_cap_value.replace('亿', '')) * 1e8
+            elif isinstance(market_cap_value, (float, int)):
+                # 处理数值格式（单位已经是亿元）
+                market_cap = float(market_cap_value) * 1e8
+            else:
+                logger.warning(f"股票{code}市值格式异常: {type(market_cap_value)}")
+                market_cap = 0.0
+
+            # ==== 获取历史数据 ====
+            start_date = self.calender.get_previous_trade_date(
+                base_date=self.trade_date,
+                days=self.config['days']
+            )
+            hist = ak.stock_zh_a_hist(
+                symbol=code,
+                period="daily",
+                adjust="hfq",
+                start_date=start_date,
+                end_date=self.trade_date
+            )
+            if len(hist) < self.config['days']:
+                logger.warning(f"股票{code}历史数据不足{self.config['days']}天")
+                return None
+            recent_gain = (hist['收盘'].iloc[-1] / hist['收盘'].iloc[0] - 1) * 100
+
+            # ==== 涨停数据 ====
+            limit_time = None
+            try:
+                zt_data = ak.stock_zt_pool_em(date=datetime.now().strftime("%Y%m%d"))
+                zt_stock = zt_data[zt_data['代码'] == code]
+                if not zt_stock.empty and '首次封板时间' in zt_stock.columns:
+                    limit_time = pd.to_datetime(zt_stock['首次封板时间'].iloc[0])
+            except Exception as e:
+                logger.error(f"获取股票{code}涨停数据失败: {str(e)}")
+
+            return {
+                'code': code,
+                'name': stock_spot['名称'].iloc[0],
+                'recent_gain': recent_gain,
+                'limit_time': limit_time,
+                'hist_data': hist,
+                'market_cap': market_cap
+            }
+        except Exception as e:
+            logger.error(f"股票{code}数据处理失败: {str(e)}", exc_info=True)
+            return None
+    def _calculate_stock_score(self, data: Dict, index_data: pd.DataFrame) -> Dict:
+        """计算个股综合得分"""
+        # 近期涨幅得分
+        gain_score = self._normalize(data['recent_gain'], 10, 30) * 100
+
+        # 逆势得分
+        resist_score = self._calculate_resist_score(data['hist_data'], index_data)
+
+        # 封板速度得分
+        fast_limit_score = 100 if data['limit_time'] and data['limit_time'].hour < self.config['fast_limit_hour'] else 0
+
+        # 加权总分
+        total = (
+                gain_score * self.config['weights']['recent_gain'] +
+                resist_score * self.config['weights']['resist_market'] +
+                fast_limit_score * self.config['weights']['fast_limit']
+        )
+
+        return {
+            'gain_score': gain_score,
+            'resist_score': resist_score,
+            'fast_limit_score': fast_limit_score,
+            'total_score': total
+        }
+
+    def _calculate_resist_score(self, stock_hist: pd.DataFrame, index_hist: pd.DataFrame) -> float:
+        """计算逆势上涨得分"""
+        try:
+            # 1. 预处理指数数据（兼容不同来源的列名）
+            index_rename_map = {
+                'pctChg': '涨跌幅',  # 处理akshare的原始列名
+                'change_pct': '涨跌幅',  # 处理其他可能格式
+                'close': 'index_close',
+                'date': '日期'
+            }
+            index_hist = index_hist.rename(columns=index_rename_map)
+            # 2. 列存在性检查
+            required_index_columns = ['日期', '涨跌幅']
+            missing_cols = [col for col in required_index_columns if col not in index_hist.columns]
+            if missing_cols:
+                logger.error(f"指数数据缺少必要列: {missing_cols}")
+                return 0
+
+            # 3. 预处理股票数据
+            stock_hist = stock_hist.rename(columns={
+                '涨跌幅': 'stock_pct_chg',
+                '日期': 'trade_date'
+            })
+
+            # 4. 安全合并数据
+            merged = stock_hist[['trade_date', 'stock_pct_chg']].merge(
+                index_hist[required_index_columns],
+                left_on='trade_date',
+                right_on='日期',
+                how='inner'
+            )
+
+            # 5. 合并后数据验证
+            if merged.empty:
+                logger.warning("股票与指数数据无交集日期")
+                return 0
+
+            # 6. 计算逻辑（添加类型转换）
+            merged['stock_pct_chg'] = pd.to_numeric(merged['stock_pct_chg'], errors='coerce')
+            merged['涨跌幅'] = pd.to_numeric(merged['涨跌幅'], errors='coerce')
+            merged = merged.dropna(subset=['stock_pct_chg', '涨跌幅'])
+
+            resist_days = len(merged[(merged['涨跌幅'] < 0) & (merged['stock_pct_chg'] > 0)])
+            total_days = len(merged)
+
+            return min(resist_days / total_days * 100, 100) if total_days > 0 else 0
+
+        except Exception as e:
+            logger.error(f"逆势得分计算失败: {str(e)}")
+            return 0
+
+    @staticmethod
+    def _normalize(value, min_val, max_val):
+        """归一化到0-100分"""
+        return max(0, min(100, (value - min_val) / (max_val - min_val) * 100))
+
 # 使用示例
 if __name__ == "__main__":
-    analyzer = SectorAnalyzer(trade_date="20250327")
+    analyzer = SectorAnalyzer(trade_date="20250328")
 
     # 获取近2日热门板块前5
     hot_sectors = analyzer.get_hot_sectors(days=2, top_n_per_type=5)
@@ -327,13 +519,15 @@ if __name__ == "__main__":
     # 构建成分股映射
     sector_map = analyzer.build_sector_map(hot_sectors)
 
-    # 假设有涨停板数据
-    zt_data = pd.DataFrame({
-        'code': ['605588'],
-        'name': ['冠石科技']
-    })
-
-    # 增强分析
-    enhanced_df = analyzer.enhance_analysis(zt_data)
-    print(enhanced_df[['code', 'name', 'hot_sectors']])
+    for sector_name, sector_type, _ in hot_sectors:
+        dragons = analyzer.get_sector_dragons(sector_name, sector_type)
+        print(f"\n【{sector_name}】龙头榜单：")
+        for i, stock in enumerate(dragons, 1):
+            print(
+                f"龙{i} {stock.get('name', '未知')}({stock.get('code', '未知')}) "
+                f"得分：{stock.get('total_score', 0):.1f}\n"
+                f"  近期涨幅：{stock.get('recent_gain', 0):.1f}% "
+                f"逆势得分：{stock.get('resist_score', 0):.1f} "
+                f"大单：{stock.get('big_order', 0) / 1e4:.1f}万"
+            )
 
