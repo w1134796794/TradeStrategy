@@ -32,7 +32,6 @@ class SectorAnalyzer:
             'weights': {  # 指标权重
                 'recent_gain': 0.4,
                 'resist_market': 0.3,
-                'big_order': 0.2,
                 'fast_limit': 0.1
             }
         }
@@ -528,6 +527,5 @@ if __name__ == "__main__":
                 f"得分：{stock.get('total_score', 0):.1f}\n"
                 f"  近期涨幅：{stock.get('recent_gain', 0):.1f}% "
                 f"逆势得分：{stock.get('resist_score', 0):.1f} "
-                f"大单：{stock.get('big_order', 0) / 1e4:.1f}万"
             )
 
