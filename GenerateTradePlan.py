@@ -6,7 +6,7 @@ from GetLHB import LHBProcessor
 from GetMarketSentiment import MarketSentimentAnalyzer
 from GetHotSectors import SectorAnalyzer
 from GetTradeDate import TradeCalendar
-from Strategies import ScoringStrategy, PositionStrategy, RiskControlStrategy
+from Strategies import ScoringStrategy, PositionStrategy, RiskControlStrategy, FilterStrategy
 from typing import List, Tuple, Dict, Set
 import akshare as ak
 
@@ -24,7 +24,7 @@ class TradePlanGenerator:
         self.lhb_processor = LHBProcessor()
         self.params = {
             'max_candidates': int(8),
-            'min_score': int(65),
+            'min_score': int(45),
             'sector_threshold': int(3)
         }
 
@@ -163,94 +163,105 @@ class TradePlanGenerator:
         """获取涨停板数据并进行预处理"""
         try:
             df = ak.stock_zt_pool_em(date=date)
-            return self._preprocess_zt_data(df)
+            return self._preprocess_zt_data(df, date)
         except Exception as e:
             logger.error(f"涨停数据获取失败: {str(e)}")
             return pd.DataFrame()
 
-    def _preprocess_zt_data(self, zt_df: pd.DataFrame) -> pd.DataFrame:
-        """预处理涨停板数据（修改后）"""
+    def _preprocess_zt_data(self, zt_df: pd.DataFrame, date: str) -> pd.DataFrame:
+        """预处理涨停板数据（修复时间解析错误）"""
+        # 重命名字段
         zt_df = zt_df.rename(columns={
             '代码': 'code',
             '名称': 'name',
+            '最新价': 'close',
             '封板资金': 'seal_amount',
             '首次封板时间': 'first_seal_time'
         })
 
-        # 使用策略类处理连板数和过滤
+        # 解析时间并合并日期
+        def parse_datetime(row):
+            try:
+                # 1. 格式化日期部分
+                formatted_date = f"{date[:4]}-{date[4:6]}-{date[6:8]}"  # YYYY-MM-DD
+
+                # 2. 处理时间字符串
+                raw_time = str(row['first_seal_time'])
+                time_str = raw_time.zfill(6)  # 补全为6位
+
+                # 3. 拆分时、分、秒并验证合法性
+                hour = int(time_str[:2])
+                minute = int(time_str[2:4])
+                second = int(time_str[4:6])
+
+                if not (0 <= hour <= 23 and 0 <= minute <= 59 and 0 <= second <= 59):
+                    raise ValueError(f"非法时间值: {time_str}")
+
+                # 4. 拼接完整日期时间
+                datetime_str = f"{formatted_date} {hour:02}:{minute:02}:{second:02}"
+
+                # 5. 解析为datetime对象
+                return pd.to_datetime(datetime_str, format='%Y-%m-%d %H:%M:%S')
+            except Exception as e:
+                logger.error(f"解析失败 | 原始值: {raw_time} | 错误: {str(e)}")
+                return pd.NaT
+
+        # 应用解析逻辑
+        zt_df['datetime'] = zt_df.apply(parse_datetime, axis=1)
+
+        # 过滤无效数据
+        zt_df = zt_df.dropna(subset=['datetime'])
+
+        # 过滤首板二板（确保保留所有列）
         filtered = ScoringStrategy.filter_early_boards(zt_df)
 
-        # 强制类型转换（处理异常值）
+        # 强制类型转换
         filtered['limit_count'] = (
             pd.to_numeric(filtered['limit_count'], errors='coerce')
-            .fillna(1)  # 无效值默认1连板
+            .fillna(1)
             .astype(int)
         )
-
         filtered['seal_amount'] = (
             pd.to_numeric(filtered['seal_amount'], errors='coerce')
             .fillna(0.0)
             .astype(float)
         )
 
-        return filtered[['code', 'name', 'limit_count', 'seal_amount', 'first_seal_time']]
+        # 返回所有必要列
+        return filtered[['code', 'name', 'close', 'limit_count', 'seal_amount', 'datetime', 'first_seal_time']]
 
     def _generate_candidates(self, data_pack: Dict) -> pd.DataFrame:
         """候选股生成（参数修复版）"""
         try:
-            # 确保基础数据存在
-            if 'zt_data' not in data_pack or data_pack['zt_data'].empty:
-                raise ValueError("涨停数据缺失")
+            # 1. 基础数据校验
+            zt_df = data_pack.get('zt_data', pd.DataFrame())
+            if zt_df.empty:
+                raise ValueError("涨停数据为空")
 
-            # ========== 处理龙虎榜数据 ==========
-            # 确保有默认值
-            lhb_scores = self._calculate_lhb_scores(data_pack.get('lhb_data', pd.DataFrame()))
-            merged = data_pack['zt_data'].copy()
+            # 2. 过滤首板/二板
+            filtered = FilterStrategy.filter_early_boards(zt_df)
 
-            # 添加lhb_score列（带默认值）
-            merged['lhb_score'] = merged['code'].map(lhb_scores).fillna(0.0)
-
-            # ========== 类型安全转换 ==========
-            type_conversion = {
-                'limit_count': {'dtype': int, 'default': 1},
-                'seal_amount': {'dtype': float, 'default': 0.0},
-                'lhb_score': {'dtype': float, 'default': 0.0}
+            # 3. 构建板块热度字典（格式: {'CAR-T细胞疗法': 85, '贵金属': 90}）
+            sector_heat_map = {
+                sector_info[0]: sector_info[2]  # (板块名, 类型, 得分) → 提取板块名和得分
+                for sector_info in data_pack.get('sectors', [])
             }
 
-            for col, config in type_conversion.items():
-                merged[col] = (
-                    pd.to_numeric(merged[col], errors='coerce')
-                    .fillna(config['default'])
-                    .astype(config['dtype'])
-                )
-
-            # ========== 评分计算 ==========
-            # 添加输入验证
-            required_columns = ['limit_count', 'seal_amount', 'lhb_score']
-            if not all(col in merged.columns for col in required_columns):
-                missing = [col for col in required_columns if col not in merged.columns]
-                raise KeyError(f"缺失关键列: {missing}")
-
-            merged['total_score'] = merged.apply(
-                lambda x: float(ScoringStrategy.calculate_total_score(x)),
+            # 4. 计算综合得分（关键修复：传递 sector_heat_map）
+            filtered['total_score'] = filtered.apply(
+                lambda row: ScoringStrategy.calculate_total_score(row, sector_heat_map),
                 axis=1
-            ).clip(0, 100)
+            )
 
-            # ========== 最终过滤 ==========
-            # 确保参数类型正确
-            min_score = int(self.params['min_score'])
-            if not pd.api.types.is_numeric_dtype(merged['total_score']):
-                raise TypeError("评分列必须为数值类型")
-
+            # 5. 按得分排序并返回 Top N
             return (
-                merged[merged['total_score'] >= min_score]
+                filtered[filtered['total_score'] >= self.params['min_score']]
                 .sort_values('total_score', ascending=False)
                 .head(self.params['max_candidates'])
             )
 
         except Exception as e:
-            logger.error(
-                f"候选股生成失败（详细日志）: {str(e)}\n当前列: {merged.columns.tolist() if 'merged' in locals() else '无数据'}")
+            logger.error(f"候选股生成失败: {str(e)}")
             return pd.DataFrame()
 
     def _calculate_lhb_scores(self, lhb_data: pd.DataFrame) -> Dict:
@@ -278,6 +289,7 @@ class TradePlanGenerator:
     def _compile_full_plan(self, plan_date: str, candidates: pd.DataFrame,
                            market_status: Dict, data_pack: Dict) -> Dict:
         """编译完整交易计划（确保所有字段存在）"""
+
         plan = {
             'plan_date': plan_date,
             'market_status': self._format_market(market_status),
@@ -302,14 +314,11 @@ class TradePlanGenerator:
             # 填充候选股数据
             if not candidates.empty:
                 plan['candidates'] = self._format_candidates(candidates, market_status)
-
             # 填充板块分析
             plan['sector_analysis'] = self._analyze_sectors(data_pack.get('sectors', []))
-
             # 填充龙虎榜数据
             if 'lhb_data' in data_pack and not data_pack['lhb_data'].empty:
                 plan['lhb_insights'] = self._extract_lhb_insights(data_pack['lhb_data'])
-
         except Exception as e:
             logger.error(f"计划编译异常: {str(e)}")
 
@@ -353,20 +362,35 @@ class TradePlanGenerator:
             return 'unknown'
 
     def _format_candidates(self, candidates: pd.DataFrame, market_status: Dict) -> List[Dict]:
-        """格式化候选股信息"""
-        return [{
-            'code': row['code'],
-            'name': row['name'],
-            'score': row['total_score'],
-            'position': PositionStrategy.calculate_position(row, market_status),
-            'entry_price': row['close'] * 1.03,
-            'stop_loss': row['close'] * 0.95,
-            'reasons': {
-                'technical': self._get_tech_reason(row),
-                'capital': self._get_capital_reason(row),
-                'sector': self._get_sector_reason(row)
-            }
-        } for _, row in candidates.iterrows()]
+        """格式化候选股信息（修复时间格式化问题）"""
+        formatted = []
+
+        candidates['first_seal_time'] = candidates['first_seal_time'].astype(str).apply(
+            lambda x: f"{x[:2]}:{x[2:4]}:{x[4:]}" if len(x) == 6 else x  # 142612 → 14:26:12
+        )
+        candidates['datetime'] = pd.to_datetime(candidates['datetime'])  # 确保日期列是datetime类型
+
+        for idx, row in candidates.iterrows():
+            try:
+                formatted.append({
+                    'code': row['code'],
+                    'name': row['name'],
+                    'score': row['total_score'],
+                    'position': PositionStrategy.calculate_position(row, market_status),
+                    'entry_price': row['close'] * 1.03,
+                    'stop_loss': row['close'] * 0.95,
+                    'reasons': {
+                        'technical': self._get_tech_reason(row),
+                        'capital': self._get_capital_reason(row),
+                        'sector': self._get_sector_reason(row)
+                    }
+                })
+            except Exception as e:
+                logger.error(
+                    f"格式化候选股失败: {row['code']} | 错误: {str(e)} | 关键值: "
+                    f"first_seal_time={row['first_seal_time']}, datetime={row['datetime']}"
+                )
+        return formatted
 
     def _get_tech_reason(self, row: pd.Series) -> str:
         """生成技术面理由"""
@@ -390,21 +414,33 @@ class TradePlanGenerator:
 
     def _get_sector_reason(self, row: pd.Series) -> str:
         """生成板块理由"""
-        if not isinstance(row['hot_sectors'], list):
-            return ""
+        try:
+            # 处理可能的缺失列或空值
+            sectors = row.get('hot_sectors', [])
+            if not isinstance(sectors, list) or len(sectors) == 0:
+                return ""
 
-        top_sectors = sorted(row['hot_sectors'], key=lambda x: x[1], reverse=True)[:2]
-        return " + ".join([f"{s[0]}({s[1]}分)" for s in top_sectors])
+            top_sectors = sorted(sectors, key=lambda x: x[1], reverse=True)[:2]
+            return " + ".join([f"{s[0]}({s[1]}分)" for s in top_sectors])
+        except Exception as e:
+            logger.error(f"生成板块理由失败: {str(e)}")
+            return ""
 
     def _analyze_sectors(self, sectors: List) -> List[Dict]:
         """生成板块分析报告"""
-        return [{
-            'name': s[0],
-            'type': s[1],
-            'momentum': s[2],
-            'leader': self.sector_analyzer._get_sector_leader(s[0])
-        } for s in sectors[:5]]
-
+        try:
+            return [{
+                'name': sector_info[0],
+                'type': sector_info[1],
+                'momentum': sector_info[2],
+                'leader': self.sector_analyzer.get_sector_dragons(
+                    sector=sector_info[0],
+                    sector_type=sector_info[1]
+                )
+            } for sector_info in sectors[:5]]
+        except IndexError as e:
+            logger.error(f"板块数据结构异常: {str(e)}")
+            return []
 
     def _extract_lhb_insights(self, lhb_data: pd.DataFrame) -> Dict:
         """提取龙虎榜洞见"""
