@@ -9,6 +9,7 @@ from GetTradeDate import TradeCalendar
 from Strategies import ScoringStrategy, PositionStrategy, RiskControlStrategy, FilterStrategy
 from typing import List, Tuple, Dict, Set
 import akshare as ak
+from concurrent.futures import as_completed
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -128,7 +129,6 @@ class TradePlanGenerator:
 
     def _collect_market_data(self, data_date: str) -> Dict:
         """并行收集市场数据（确保返回正确类型）"""
-        from concurrent.futures import as_completed
 
         results = {
             'zt_data': pd.DataFrame(),
@@ -176,7 +176,8 @@ class TradePlanGenerator:
             '名称': 'name',
             '最新价': 'close',
             '封板资金': 'seal_amount',
-            '首次封板时间': 'first_seal_time'
+            '首次封板时间': 'first_seal_time',
+            '连板数': 'limit_count'
         })
 
         # 解析时间并合并日期
@@ -212,23 +213,20 @@ class TradePlanGenerator:
         # 过滤无效数据
         zt_df = zt_df.dropna(subset=['datetime'])
 
-        # 过滤首板二板（确保保留所有列）
-        filtered = ScoringStrategy.filter_early_boards(zt_df)
-
         # 强制类型转换
-        filtered['limit_count'] = (
-            pd.to_numeric(filtered['limit_count'], errors='coerce')
+        zt_df['limit_count'] = (
+            pd.to_numeric(zt_df['limit_count'], errors='coerce')
             .fillna(1)
             .astype(int)
         )
-        filtered['seal_amount'] = (
-            pd.to_numeric(filtered['seal_amount'], errors='coerce')
+        zt_df['seal_amount'] = (
+            pd.to_numeric(zt_df['seal_amount'], errors='coerce')
             .fillna(0.0)
             .astype(float)
         )
 
         # 返回所有必要列
-        return filtered[['code', 'name', 'close', 'limit_count', 'seal_amount', 'datetime', 'first_seal_time']]
+        return zt_df[['code', 'name', 'close', 'limit_count', 'seal_amount', 'datetime', 'first_seal_time']]
 
     def _generate_candidates(self, data_pack: Dict) -> pd.DataFrame:
         """候选股生成（参数修复版）"""
@@ -243,16 +241,17 @@ class TradePlanGenerator:
 
             # 3. 构建板块热度字典（格式: {'CAR-T细胞疗法': 85, '贵金属': 90}）
             sector_heat_map = {
-                sector_info[0]: sector_info[2]  # (板块名, 类型, 得分) → 提取板块名和得分
+                sector_info[0]: sector_info[2]  # (板块名, 类型, 涨幅) → 提取板块名和涨幅
                 for sector_info in data_pack.get('sectors', [])
             }
+            print(f'sector_heat_map:\n{sector_heat_map}')
 
             # 4. 计算综合得分（关键修复：传递 sector_heat_map）
             filtered['total_score'] = filtered.apply(
                 lambda row: ScoringStrategy.calculate_total_score(row, sector_heat_map),
                 axis=1
             )
-
+            print(f'filtered:\n {filtered}')
             # 5. 按得分排序并返回 Top N
             return (
                 filtered[filtered['total_score'] >= self.params['min_score']]
