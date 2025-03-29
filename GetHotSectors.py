@@ -10,6 +10,7 @@ from GetTradeDate import TradeCalendar
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+pd.set_option('display.max_columns', None)
 
 class SectorAnalyzer:
     """热门板块分析器（优化版）"""
@@ -30,9 +31,9 @@ class SectorAnalyzer:
             'net_inflow_threshold': 5e7,  # 大单净流入阈值(元)
             'fast_limit_hour': 10,  # 快速涨停时间阈值(小时)
             'weights': {  # 指标权重
-                'recent_gain': 0.4,
+                'recent_gain': 0.5,
                 'resist_market': 0.3,
-                'fast_limit': 0.1
+                'fast_limit': 0.2
             }
         }
 
@@ -336,7 +337,7 @@ class SectorAnalyzer:
         stock_data = self._collect_stock_data(list(components)[:50])  # 限制前50只
 
         # 获取大盘数据
-        index_data = ak.stock_zh_index_daily(symbol=self.config['index_code'])
+        index_data = ak.stock_zh_index_daily(symbol=self.config['index_code']).iloc[-10:]
 
         # 计算评分
         scored_stocks = []
@@ -403,6 +404,7 @@ class SectorAnalyzer:
             if len(hist) < self.config['days']:
                 logger.warning(f"股票{code}历史数据不足{self.config['days']}天")
                 return None
+
             recent_gain = (hist['收盘'].iloc[-1] / hist['收盘'].iloc[0] - 1) * 100
 
             # ==== 涨停数据 ====
@@ -411,7 +413,23 @@ class SectorAnalyzer:
                 zt_data = ak.stock_zt_pool_em(date=datetime.now().strftime("%Y%m%d"))
                 zt_stock = zt_data[zt_data['代码'] == code]
                 if not zt_stock.empty and '首次封板时间' in zt_stock.columns:
-                    limit_time = pd.to_datetime(zt_stock['首次封板时间'].iloc[0])
+                    raw_time = str(zt_stock['首次封板时间'].iloc[0])
+                    try:
+                        # 补全为6位数字
+                        time_str = raw_time.zfill(6)
+
+                        # 格式化为HH:MM:SS
+                        formatted_time = f"{time_str[:2]}:{time_str[2:4]}:{time_str[4:6]}"
+
+                        # 拼接完整日期
+                        current_date = datetime.now().strftime("%Y-%m-%d")
+                        full_datetime = f"{current_date} {formatted_time}"
+
+                        # 解析为datetime对象
+                        limit_time = pd.to_datetime(full_datetime, format='%Y-%m-%d %H:%M:%S')
+                    except Exception as e:
+                        logger.error(f"解析涨停时间失败: {raw_time} → 错误: {str(e)}")
+                        limit_time = None
             except Exception as e:
                 logger.error(f"获取股票{code}涨停数据失败: {str(e)}")
 
@@ -426,93 +444,112 @@ class SectorAnalyzer:
         except Exception as e:
             logger.error(f"股票{code}数据处理失败: {str(e)}", exc_info=True)
             return None
+
     def _calculate_stock_score(self, data: Dict, index_data: pd.DataFrame) -> Dict:
-        """计算个股综合得分"""
-        # 近期涨幅得分
-        gain_score = self._normalize(data['recent_gain'], 10, 30) * 100
+        """股票评分计算（全部分类独立百分制）"""
+        # 近期涨幅得分（0-100分）
+        gain_score = self._normalize(
+            value=data['recent_gain'],
+            min_val=5,  # 假设5%涨幅为基准值
+            max_val=30  # 30%涨幅为满分阈值
+        ) * 100
 
-        # 逆势得分
-        resist_score = self._calculate_resist_score(data['hist_data'], index_data)
+        # 逆势得分（0-100分）
+        resist_score = min(self._calculate_resist_score(
+            stock_data=data['hist_data'],
+            index_data=index_data
+        ), 100)  # 确保不超过100
 
-        # 封板速度得分
-        fast_limit_score = 100 if data['limit_time'] and data['limit_time'].hour < self.config['fast_limit_hour'] else 0
+        # 封板速度得分（0或100分）
+        fast_limit_score = 100 if (
+                data['limit_time'] and
+                data['limit_time'].hour < self.config['fast_limit_hour']
+        ) else 0
 
-        # 加权总分
-        total = (
+        # 加权总分（权重和为1时总分自然0-100）
+        total_score = (
                 gain_score * self.config['weights']['recent_gain'] +
                 resist_score * self.config['weights']['resist_market'] +
                 fast_limit_score * self.config['weights']['fast_limit']
         )
 
         return {
-            'gain_score': gain_score,
-            'resist_score': resist_score,
-            'fast_limit_score': fast_limit_score,
-            'total_score': total
+            'gain_score': round(gain_score, 1),  # 近期涨幅（0-100）
+            'resist_score': round(resist_score, 1),  # 逆势能力（0-100）
+            'fast_limit_score': fast_limit_score,  # 封板速度（0/100）
+            'total_score': round(total_score, 1)  # 综合得分（0-100）
         }
 
-    def _calculate_resist_score(self, stock_hist: pd.DataFrame, index_hist: pd.DataFrame) -> float:
-        """计算逆势上涨得分"""
+    def _calculate_resist_score(self, stock_data: pd.DataFrame, index_data: pd.DataFrame) -> float:
+        """计算逆势得分（完整字段映射版本）"""
         try:
-            # 1. 预处理指数数据（兼容不同来源的列名）
-            index_rename_map = {
-                'pctChg': '涨跌幅',  # 处理akshare的原始列名
-                'change_pct': '涨跌幅',  # 处理其他可能格式
-                'close': 'index_close',
-                'date': '日期'
-            }
-            index_hist = index_hist.rename(columns=index_rename_map)
-            # 2. 列存在性检查
-            required_index_columns = ['日期', '涨跌幅']
-            missing_cols = [col for col in required_index_columns if col not in index_hist.columns]
-            if missing_cols:
-                logger.error(f"指数数据缺少必要列: {missing_cols}")
-                return 0
-
-            # 3. 预处理股票数据
-            stock_hist = stock_hist.rename(columns={
-                '涨跌幅': 'stock_pct_chg',
-                '日期': 'trade_date'
+            # ===== 1. 字段映射预处理 =====
+            # 股票数据列名标准化
+            stock_df = stock_data.rename(columns={
+                "日期": "date",  # 日期字段统一
+                "涨跌幅": "pct_change",  # 涨跌幅字段映射
+                "收盘": "close"  # 收盘价映射（可选）
             })
 
-            # 4. 安全合并数据
-            merged = stock_hist[['trade_date', 'stock_pct_chg']].merge(
-                index_hist[required_index_columns],
-                left_on='trade_date',
-                right_on='日期',
-                how='inner'
+            # 指数数据列名标准化
+            index_df = index_data.rename(columns={
+                "close": "index_close"  # 明确指数收盘价
+            }).copy()
+
+            # ===== 2. 计算指数涨跌幅 =====
+            # 确保数据按日期排序
+            index_df = index_df.sort_values("date")
+            # 计算日涨跌幅（保留原始收盘价）
+            index_df["index_pct_change"] = index_df["index_close"].pct_change() * 100
+            index_df = index_df.dropna(subset=["index_pct_change"])
+
+            # ===== 3. 数据合并 =====
+            # 转换日期格式（确保两边都是datetime）
+            stock_df["date"] = pd.to_datetime(stock_df["date"])
+            index_df["date"] = pd.to_datetime(index_df["date"])
+
+            # 合并数据（使用inner join确保日期对齐）
+            merged_df = pd.merge(
+                stock_df[["date", "pct_change"]],  # 只需要日期和股票涨跌幅
+                index_df[["date", "index_pct_change"]],
+                on="date",
+                how="inner"
             )
 
-            # 5. 合并后数据验证
-            if merged.empty:
-                logger.warning("股票与指数数据无交集日期")
-                return 0
+            # ===== 4. 计算逆势天数 =====
+            if merged_df.empty:
+                logger.warning("股票与指数数据无共同交易日")
+                return 0.0
 
-            # 6. 计算逻辑（添加类型转换）
-            merged['stock_pct_chg'] = pd.to_numeric(merged['stock_pct_chg'], errors='coerce')
-            merged['涨跌幅'] = pd.to_numeric(merged['涨跌幅'], errors='coerce')
-            merged = merged.dropna(subset=['stock_pct_chg', '涨跌幅'])
+            # 计算条件：指数下跌且股票上涨
+            resist_condition = ((merged_df["index_pct_change"] < 0) & (merged_df["pct_change"] > 0))
 
-            resist_days = len(merged[(merged['涨跌幅'] < 0) & (merged['stock_pct_chg'] > 0)])
-            total_days = len(merged)
+            resist_days = resist_condition.sum()
+            total_days = len(merged_df)
 
-            return min(resist_days / total_days * 100, 100) if total_days > 0 else 0
+            # ===== 5. 最终得分计算 =====
+            resist_score = (resist_days / total_days) * 100 if total_days > 0 else 0
+            return min(resist_score, 100)  # 确保不超过100分
 
         except Exception as e:
-            logger.error(f"逆势得分计算失败: {str(e)}")
-            return 0
+            logger.error(f"逆势得分计算失败: {str(e)}", exc_info=True)
+            return 0.0
 
     @staticmethod
-    def _normalize(value, min_val, max_val):
-        """归一化到0-100分"""
-        return max(0, min(100, (value - min_val) / (max_val - min_val) * 100))
+    def _normalize(value: float, min_val: float, max_val: float) -> float:
+        """标准化到0-1范围（自动处理极端值）"""
+        if max_val <= min_val:
+            return 0.0
+        clipped_value = max(min(value, max_val), min_val)
+        return (clipped_value - min_val) / (max_val - min_val)
+
 
 # 使用示例
 if __name__ == "__main__":
     analyzer = SectorAnalyzer(trade_date="20250328")
 
     # 获取近2日热门板块前5
-    hot_sectors = analyzer.get_hot_sectors(days=2, top_n_per_type=5)
+    hot_sectors = analyzer.get_hot_sectors(days=2, top_n_per_type=1)
     print("热门板块:", hot_sectors)
 
     # 构建成分股映射
@@ -527,5 +564,5 @@ if __name__ == "__main__":
                 f"得分：{stock.get('total_score', 0):.1f}\n"
                 f"  近期涨幅：{stock.get('recent_gain', 0):.1f}% "
                 f"逆势得分：{stock.get('resist_score', 0):.1f} "
+                f"快速上板得分：{stock.get('limit_time', 0):.1f} "
             )
-
