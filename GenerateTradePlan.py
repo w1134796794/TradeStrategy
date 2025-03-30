@@ -177,7 +177,8 @@ class TradePlanGenerator:
             '最新价': 'close',
             '封板资金': 'seal_amount',
             '首次封板时间': 'first_seal_time',
-            '连板数': 'limit_count'
+            '连板数': 'limit_count',
+            '流通市值': 'circ_market_cap'
         })
 
         # 解析时间并合并日期
@@ -224,9 +225,14 @@ class TradePlanGenerator:
             .fillna(0.0)
             .astype(float)
         )
+        zt_df['circ_market_cap'] = (
+            pd.to_numeric(zt_df['circ_market_cap'], errors='coerce')
+            .fillna(0.0)
+            .astype(float)
+        )
 
         # 返回所有必要列
-        return zt_df[['code', 'name', 'close', 'limit_count', 'seal_amount', 'datetime', 'first_seal_time']]
+        return zt_df[['code', 'name', 'close', 'limit_count', 'seal_amount', 'datetime', 'first_seal_time', 'circ_market_cap']]
 
     def _generate_candidates(self, data_pack: Dict) -> pd.DataFrame:
         """候选股生成（参数修复版）"""
@@ -251,6 +257,27 @@ class TradePlanGenerator:
             # 获取热点板块成分股映射
             hot_sectors = data_pack.get('sectors', [])
             sector_stocks_map = self.sector_analyzer.build_sector_map(hot_sectors)
+
+            # 构建板块名到板块涨幅的映射
+            sector_score_map = {
+                (name, sector_type): score
+                for name, sector_type, score in hot_sectors
+            }
+
+            # 为每只股票添加所属板块及板块涨幅
+            def map_sectors(code: str) -> list:
+                matched = []
+                for sector_key in sector_stocks_map:
+                    try:
+                        name, stype = sector_key.split('_', 1)
+                    except ValueError:
+                        continue
+                    if code in sector_stocks_map[sector_key]:
+                        score = sector_score_map.get((name, stype), 0)
+                        matched.append((name, score))
+                return matched
+
+            filtered['hot_sectors'] = filtered['code'].apply(map_sectors)
 
             # 4. 计算综合得分（关键修复：传递 sector_heat_map）
             filtered['total_score'] = filtered.apply(
@@ -324,7 +351,6 @@ class TradePlanGenerator:
             # 填充龙虎榜数据
             if 'lhb_data' in data_pack and not data_pack['lhb_data'].empty:
                 plan['lhb_insights'] = self._extract_lhb_insights(data_pack['lhb_data'])
-            print(f"candidates:\n{candidates}")
         except Exception as e:
             logger.error(f"计划编译异常: {str(e)}")
 
@@ -399,14 +425,23 @@ class TradePlanGenerator:
         return formatted
 
     def _get_tech_reason(self, row: pd.Series) -> str:
-        """生成技术面理由"""
+        """生成技术面理由（封单占比版）"""
         parts = []
+
+        # 连板数判断
         if row['limit_count'] >= 3:
             parts.append(f"{row['limit_count']}连板强势")
+
+        # 早盘涨停判断
         if pd.to_datetime(row['first_seal_time']).hour < 10:
             parts.append("早盘快速涨停")
-        if row['seal_amount'] > 1e8:
-            parts.append(f"封单{row['seal_amount'] / 1e8:.1f}亿")
+
+        # 封单占比判断（新增逻辑）
+        if row.get('circ_market_cap', 0) > 0:
+            seal_ratio = row['seal_amount'] / row['circ_market_cap']
+            if seal_ratio > 0.015:
+                parts.append(f"封单占流通市值{seal_ratio * 100:.1f}%")
+
         return "，".join(parts) if parts else "技术形态突破"
 
     def _get_capital_reason(self, row: pd.Series) -> str:
@@ -435,7 +470,7 @@ class TradePlanGenerator:
                 return ""
 
             top_sectors = sorted(sectors, key=lambda x: x[1], reverse=True)[:2]
-            return " + ".join([f"{s[0]}({s[1]}分)" for s in top_sectors])
+            return " + ".join([f"{name}(涨幅: {score}%)" for name, score in top_sectors])
         except Exception as e:
             logger.error(f"生成板块理由失败: {str(e)}")
             return ""
