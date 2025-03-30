@@ -4,13 +4,18 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="0393c75c-e7b1-4b55-9a03-734e0ec812a4" name="Changes" comment="atuo">
+    <list default="true" id="0393c75c-e7b1-4b55-9a03-734e0ec812a4" name="Changes" comment="优化中">
+      <change afterPath="$PROJECT_DIR$/.idea/encodings.xml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/clean_cache.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/utils.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/Cache_Manager.py" beforeDir="false" afterPath="$PROJECT_DIR$/Cache_Manager.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/GenerateTradePlan.py" beforeDir="false" afterPath="$PROJECT_DIR$/GenerateTradePlan.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/GetHotSectors.py" beforeDir="false" afterPath="$PROJECT_DIR$/GetHotSectors.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/GetLHB.py" beforeDir="false" afterPath="$PROJECT_DIR$/GetLHB.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/GetTradeDate.py" beforeDir="false" afterPath="$PROJECT_DIR$/GetTradeDate.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/Strategies.py" beforeDir="false" afterPath="$PROJECT_DIR$/Strategies.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/ak.py" beforeDir="false" afterPath="$PROJECT_DIR$/ak.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/main.py" beforeDir="false" afterPath="$PROJECT_DIR$/main.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/test.py" beforeDir="false" afterPath="$PROJECT_DIR$/test.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -41,7 +46,10 @@
   <component name="PropertiesComponent"><![CDATA[{
   "keyToString": {
     "Python.GenerateTradePlan.executor": "Run",
+    "Python.GetHotSectors.executor": "Run",
     "Python.GetLHB (1).executor": "Run",
+    "Python.GetLHB.executor": "Run",
+    "Python.GetMarketSentiment.executor": "Run",
     "Python.HotSectors.executor": "Run",
     "Python.LHB.executor": "Run",
     "Python.MarketSentiment.executor": "Run",
@@ -67,9 +75,10 @@
     "Python.ts.executor": "Run",
     "RunOnceActivity.OpenProjectViewOnStart": "true",
     "RunOnceActivity.ShowReadmeOnStart": "true",
+    "SHARE_PROJECT_CONFIGURATION_FILES": "true",
     "git-widget-placeholder": "master",
     "ignore.virus.scanning.warn.message": "true",
-    "last_opened_file_path": "G:/Anaconda3/condabin/conda.bat",
+    "last_opened_file_path": "G:/TradeStrategy",
     "settings.editor.selected.configurable": "com.jetbrains.python.configuration.PyActiveSdkModuleConfigurable"
   }
 }]]></component>
@@ -96,7 +105,7 @@
       <option name="INPUT_FILE" value="" />
       <method v="2" />
     </configuration>
-    <configuration name="GetLHB (1)" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
+    <configuration name="GetHotSectors" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
       <module name="TradeModel" />
       <option name="ENV_FILES" value="" />
       <option name="INTERPRETER_OPTIONS" value="" />
@@ -109,7 +118,7 @@
       <option name="IS_MODULE_SDK" value="true" />
       <option name="ADD_CONTENT_ROOTS" value="true" />
       <option name="ADD_SOURCE_ROOTS" value="true" />
-      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/GetLHB.py" />
+      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/GetHotSectors.py" />
       <option name="PARAMETERS" value="" />
       <option name="SHOW_COMMAND_LINE" value="false" />
       <option name="EMULATE_TERMINAL" value="false" />
@@ -131,7 +140,29 @@
       <option name="IS_MODULE_SDK" value="true" />
       <option name="ADD_CONTENT_ROOTS" value="true" />
       <option name="ADD_SOURCE_ROOTS" value="true" />
-      <option name="SCRIPT_NAME" value="G:\model\TradeModel\GetLHB.py" />
+      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/GetLHB.py" />
+      <option name="PARAMETERS" value="" />
+      <option name="SHOW_COMMAND_LINE" value="false" />
+      <option name="EMULATE_TERMINAL" value="false" />
+      <option name="MODULE_MODE" value="false" />
+      <option name="REDIRECT_INPUT" value="false" />
+      <option name="INPUT_FILE" value="" />
+      <method v="2" />
+    </configuration>
+    <configuration name="GetMarketSentiment" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
+      <module name="TradeModel" />
+      <option name="ENV_FILES" value="" />
+      <option name="INTERPRETER_OPTIONS" value="" />
+      <option name="PARENT_ENVS" value="true" />
+      <envs>
+        <env name="PYTHONUNBUFFERED" value="1" />
+      </envs>
+      <option name="SDK_HOME" value="" />
+      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$" />
+      <option name="IS_MODULE_SDK" value="true" />
+      <option name="ADD_CONTENT_ROOTS" value="true" />
+      <option name="ADD_SOURCE_ROOTS" value="true" />
+      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/GetMarketSentiment.py" />
       <option name="PARAMETERS" value="" />
       <option name="SHOW_COMMAND_LINE" value="false" />
       <option name="EMULATE_TERMINAL" value="false" />
@@ -154,28 +185,6 @@
       <option name="ADD_CONTENT_ROOTS" value="true" />
       <option name="ADD_SOURCE_ROOTS" value="true" />
       <option name="SCRIPT_NAME" value="$PROJECT_DIR$/Strategies.py" />
-      <option name="PARAMETERS" value="" />
-      <option name="SHOW_COMMAND_LINE" value="false" />
-      <option name="EMULATE_TERMINAL" value="false" />
-      <option name="MODULE_MODE" value="false" />
-      <option name="REDIRECT_INPUT" value="false" />
-      <option name="INPUT_FILE" value="" />
-      <method v="2" />
-    </configuration>
-    <configuration name="Trading" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
-      <module name="TradeModel" />
-      <option name="ENV_FILES" value="" />
-      <option name="INTERPRETER_OPTIONS" value="" />
-      <option name="PARENT_ENVS" value="true" />
-      <envs>
-        <env name="PYTHONUNBUFFERED" value="1" />
-      </envs>
-      <option name="SDK_HOME" value="" />
-      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$" />
-      <option name="IS_MODULE_SDK" value="true" />
-      <option name="ADD_CONTENT_ROOTS" value="true" />
-      <option name="ADD_SOURCE_ROOTS" value="true" />
-      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/Trading.py" />
       <option name="PARAMETERS" value="" />
       <option name="SHOW_COMMAND_LINE" value="false" />
       <option name="EMULATE_TERMINAL" value="false" />
@@ -208,11 +217,11 @@
     </configuration>
     <recent_temporary>
       <list>
-        <item itemvalue="Python.GetLHB (1)" />
-        <item itemvalue="Python.Strategies" />
-        <item itemvalue="Python.Trading" />
-        <item itemvalue="Python.GenerateTradePlan" />
+        <item itemvalue="Python.GetMarketSentiment" />
         <item itemvalue="Python.GetLHB" />
+        <item itemvalue="Python.GenerateTradePlan" />
+        <item itemvalue="Python.GetHotSectors" />
+        <item itemvalue="Python.Strategies" />
       </list>
     </recent_temporary>
   </component>
@@ -256,12 +265,180 @@
       <option name="project" value="LOCAL" />
       <updated>1743003450729</updated>
     </task>
-    <option name="localTasksCounter" value="4" />
+    <task id="LOCAL-00004" summary="atuo">
+      <option name="closed" value="true" />
+      <created>1743007314288</created>
+      <option name="number" value="00004" />
+      <option name="presentableId" value="LOCAL-00004" />
+      <option name="project" value="LOCAL" />
+      <updated>1743007314288</updated>
+    </task>
+    <task id="LOCAL-00005" summary="获取热门板块">
+      <option name="closed" value="true" />
+      <created>1743078270771</created>
+      <option name="number" value="00005" />
+      <option name="presentableId" value="LOCAL-00005" />
+      <option name="project" value="LOCAL" />
+      <updated>1743078270771</updated>
+    </task>
+    <task id="LOCAL-00006" summary="生成交易计划">
+      <option name="closed" value="true" />
+      <created>1743078347807</created>
+      <option name="number" value="00006" />
+      <option name="presentableId" value="LOCAL-00006" />
+      <option name="project" value="LOCAL" />
+      <updated>1743078347807</updated>
+    </task>
+    <task id="LOCAL-00007" summary="获取近2日热门行业/概念前5">
+      <option name="closed" value="true" />
+      <created>1743088840124</created>
+      <option name="number" value="00007" />
+      <option name="presentableId" value="LOCAL-00007" />
+      <option name="project" value="LOCAL" />
+      <updated>1743088840124</updated>
+    </task>
+    <task id="LOCAL-00008" summary="交易日">
+      <option name="closed" value="true" />
+      <created>1743089620691</created>
+      <option name="number" value="00008" />
+      <option name="presentableId" value="LOCAL-00008" />
+      <option name="project" value="LOCAL" />
+      <updated>1743089620691</updated>
+    </task>
+    <task id="LOCAL-00009" summary="交易策略">
+      <option name="closed" value="true" />
+      <created>1743089677700</created>
+      <option name="number" value="00009" />
+      <option name="presentableId" value="LOCAL-00009" />
+      <option name="project" value="LOCAL" />
+      <updated>1743089677700</updated>
+    </task>
+    <task id="LOCAL-00010" summary="市场情绪">
+      <option name="closed" value="true" />
+      <created>1743089702073</created>
+      <option name="number" value="00010" />
+      <option name="presentableId" value="LOCAL-00010" />
+      <option name="project" value="LOCAL" />
+      <updated>1743089702073</updated>
+    </task>
+    <task id="LOCAL-00011" summary="交易计划">
+      <option name="closed" value="true" />
+      <created>1743089764497</created>
+      <option name="number" value="00011" />
+      <option name="presentableId" value="LOCAL-00011" />
+      <option name="project" value="LOCAL" />
+      <updated>1743089764497</updated>
+    </task>
+    <task id="LOCAL-00012" summary="优化获取热门板块龙头股逻辑">
+      <option name="closed" value="true" />
+      <created>1743179360411</created>
+      <option name="number" value="00012" />
+      <option name="presentableId" value="LOCAL-00012" />
+      <option name="project" value="LOCAL" />
+      <updated>1743179360411</updated>
+    </task>
+    <task id="LOCAL-00013" summary="优化获取热门板块龙头股逻辑">
+      <option name="closed" value="true" />
+      <created>1743179605338</created>
+      <option name="number" value="00013" />
+      <option name="presentableId" value="LOCAL-00013" />
+      <option name="project" value="LOCAL" />
+      <updated>1743179605338</updated>
+    </task>
+    <task id="LOCAL-00014" summary="简化逻辑">
+      <option name="closed" value="true" />
+      <created>1743255171266</created>
+      <option name="number" value="00014" />
+      <option name="presentableId" value="LOCAL-00014" />
+      <option name="project" value="LOCAL" />
+      <updated>1743255171266</updated>
+    </task>
+    <task id="LOCAL-00015" summary="获取热门板块">
+      <option name="closed" value="true" />
+      <created>1743255289110</created>
+      <option name="number" value="00015" />
+      <option name="presentableId" value="LOCAL-00015" />
+      <option name="project" value="LOCAL" />
+      <updated>1743255289110</updated>
+    </task>
+    <task id="LOCAL-00016" summary="完善策略逻辑">
+      <option name="closed" value="true" />
+      <created>1743255328527</created>
+      <option name="number" value="00016" />
+      <option name="presentableId" value="LOCAL-00016" />
+      <option name="project" value="LOCAL" />
+      <updated>1743255328527</updated>
+    </task>
+    <task id="LOCAL-00017" summary="交易计划">
+      <option name="closed" value="true" />
+      <created>1743262793433</created>
+      <option name="number" value="00017" />
+      <option name="presentableId" value="LOCAL-00017" />
+      <option name="project" value="LOCAL" />
+      <updated>1743262793433</updated>
+    </task>
+    <task id="LOCAL-00018" summary="交易日期新增缓存机制">
+      <option name="closed" value="true" />
+      <created>1743302260541</created>
+      <option name="number" value="00018" />
+      <option name="presentableId" value="LOCAL-00018" />
+      <option name="project" value="LOCAL" />
+      <updated>1743302260541</updated>
+    </task>
+    <task id="LOCAL-00019" summary="龙虎榜数据新增缓存机制">
+      <option name="closed" value="true" />
+      <created>1743302792485</created>
+      <option name="number" value="00019" />
+      <option name="presentableId" value="LOCAL-00019" />
+      <option name="project" value="LOCAL" />
+      <updated>1743302792485</updated>
+    </task>
+    <task id="LOCAL-00020" summary="优化中">
+      <option name="closed" value="true" />
+      <created>1743316265521</created>
+      <option name="number" value="00020" />
+      <option name="presentableId" value="LOCAL-00020" />
+      <option name="project" value="LOCAL" />
+      <updated>1743316265521</updated>
+    </task>
+    <task id="LOCAL-00021" summary="优化中">
+      <option name="closed" value="true" />
+      <created>1743319093456</created>
+      <option name="number" value="00021" />
+      <option name="presentableId" value="LOCAL-00021" />
+      <option name="project" value="LOCAL" />
+      <updated>1743319093456</updated>
+    </task>
+    <option name="localTasksCounter" value="22" />
     <servers />
+  </component>
+  <component name="Vcs.Log.Tabs.Properties">
+    <option name="TAB_STATES">
+      <map>
+        <entry key="MAIN">
+          <value>
+            <State />
+          </value>
+        </entry>
+      </map>
+    </option>
   </component>
   <component name="VcsManagerConfiguration">
     <MESSAGE value="1" />
     <MESSAGE value="atuo" />
-    <option name="LAST_COMMIT_MESSAGE" value="atuo" />
+    <MESSAGE value="生成交易计划" />
+    <MESSAGE value="获取近2日热门行业/概念前5" />
+    <MESSAGE value="交易日" />
+    <MESSAGE value="交易策略" />
+    <MESSAGE value="市场情绪" />
+    <MESSAGE value="优化获取热门板块龙头股逻辑" />
+    <MESSAGE value="简化逻辑" />
+    <MESSAGE value="获取热门板块" />
+    <MESSAGE value="完善策略逻辑" />
+    <MESSAGE value="交易计划" />
+    <MESSAGE value="交易日期新增缓存机制" />
+    <MESSAGE value="龙虎榜数据新增缓存机制" />
+    <MESSAGE value="优化中" />
+    <option name="LAST_COMMIT_MESSAGE" value="优化中" />
   </component>
 </project>

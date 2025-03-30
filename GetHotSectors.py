@@ -7,6 +7,7 @@ from typing import List, Tuple, Dict, Set
 import logging
 from GetTradeDate import TradeCalendar
 import json
+from Cache_Manager import default_cache
 from pathlib import Path
 
 logging.basicConfig(level=logging.INFO)
@@ -23,7 +24,7 @@ class SectorAnalyzer:
         初始化分析器
         :param trade_date: 交易日（格式：YYYYMMDD），默认取最近交易日
         """
-        self.cache_dir = Path("sector_cache")
+        self.cache_dir = Path("cache")
         self.cache_dir.mkdir(exist_ok=True)
         self.calender = TradeCalendar()
         self.trade_date = trade_date or self._get_recent_trade_date()
@@ -144,6 +145,7 @@ class SectorAnalyzer:
             logger.error(f"获取{sector_type}板块列表失败: {str(e)}")
             return []
 
+    @default_cache(prefix="sector_cache", ttl=86400)  # 每日缓存
     def get_hot_sectors(self, days: int = 2, top_n_per_type: int = 5) -> List[Tuple[str, str, float]]:
         """获取热门板块排行（行业+概念各取前N）"""
         try:
@@ -188,6 +190,7 @@ class SectorAnalyzer:
             logger.error(f"获取热门板块失败: {str(e)}", exc_info=True)
             return []
 
+    @default_cache(prefix="sector_components_cache", ttl=7200)
     def _get_sector_components(self, sector_name: str, sector_type: str) -> Set[str]:
         """获取板块成分股（增强版）"""
         try:
@@ -221,30 +224,10 @@ class SectorAnalyzer:
             logger.error(f"获取[{sector_type}]板块[{sector_name}]成分股异常: {str(e)}", exc_info=True)
             return set()
 
+    @default_cache(prefix="sector_map_cache", ttl=7200)
     def build_sector_map(self, hot_sectors: list) -> dict:
         """构建板块映射并缓存（键类型已修复）"""
-        cache_file = self.cache_dir / f"sector_map_{self.trade_date}.json"
-
-        # 尝试读取缓存
-        if cache_file.exists():
-            try:
-                with open(cache_file, "r", encoding="utf-8") as f:
-                    return json.load(f)
-            except (json.JSONDecodeError, UnicodeDecodeError) as e:
-                logger.error(f"缓存文件损坏: {str(e)}，重新生成")
-                cache_file.unlink()
-
-        # 重新构建并写入缓存
-        sector_map = self._build_map(hot_sectors)
-        with open(cache_file, "w", encoding="utf-8") as f:
-            json.dump(
-                sector_map,
-                f,
-                indent=2,
-                ensure_ascii=False,
-                default=str  # 处理其他非 JSON 类型
-            )
-        return sector_map
+        return self._build_map(hot_sectors)
 
     def _build_map(self, hot_sectors: List, max_workers: int = 5) -> Dict:
         """构建板块成分股映射（键类型修复版）"""

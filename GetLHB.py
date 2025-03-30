@@ -4,6 +4,7 @@ from typing import List
 from GetTradeDate import TradeCalendar
 from functools import lru_cache
 
+from Cache_Manager import default_cache
 pd.set_option("display.max_column", None)
 
 
@@ -137,6 +138,7 @@ class LHBProcessor:
 
         return pd.DataFrame(records)
 
+    @default_cache(prefix="lhb_cache", ttl=86400)
     def get_enhanced_data(self,
                           dates: List[str],
                           statistic_period: str = "近一月") -> pd.DataFrame:

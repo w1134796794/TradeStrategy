@@ -10,6 +10,7 @@ from Strategies import ScoringStrategy, PositionStrategy, RiskControlStrategy, F
 from typing import List, Tuple, Dict, Set
 import akshare as ak
 from concurrent.futures import as_completed
+from Cache_Manager import default_cache
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -127,6 +128,7 @@ class TradePlanGenerator:
                 'limit_down': 0
             }
 
+    @default_cache(prefix="market_cache", ttl=7200)
     def _collect_market_data(self, data_date: str) -> Dict:
         """并行收集市场数据（确保返回正确类型）"""
 

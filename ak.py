@@ -3,7 +3,7 @@ import akshare as ak
 import pandas as pd
 from datetime import datetime, timedelta
 import logging
-from TradeDate import TradeCalendar
+from GetTradeDate import TradeCalendar
 
 # 配置日志
 logger = logging.getLogger(__name__)
