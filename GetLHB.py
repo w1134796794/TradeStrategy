@@ -2,6 +2,7 @@ import akshare as ak
 import pandas as pd
 from typing import List
 from GetTradeDate import TradeCalendar
+from functools import lru_cache
 
 pd.set_option("display.max_column", None)
 
@@ -19,6 +20,7 @@ class LHBProcessor:
         self.statistics_cache = {}
         self.calendar = TradeCalendar()
 
+    @lru_cache(maxsize=3)  # 缓存最近3个周期的数据
     def _get_statistic_data(self, period: str = "近一月") -> pd.DataFrame:
         """获取统计周期内的全部股票上榜数据"""
         try:
@@ -30,6 +32,10 @@ class LHBProcessor:
         except Exception as e:
             print(f"统计信息获取失败（{period}）: {e}")
             return pd.DataFrame()
+
+    def clear_cache(self):
+        """手动清理统计缓存"""
+        self._get_statistic_data.cache_clear()
 
     def _get_basic_data(self, start_date: str, end_date: str) -> pd.DataFrame:
         """获取当日龙虎榜基础数据"""
