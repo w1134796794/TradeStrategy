@@ -18,15 +18,13 @@ class ScoringStrategy:
     _CONFIG = {
         # 权重配置（总和建议为1）
         "weights": {
-            "board_level": 0.3,  # 连板层级权重（首板/二板）
-            "sector_heat": 0.3,  # 板块热度权重
+            "board_level": 0.1,  # 连板层级权重（首板/二板）
+            "sector_heat": 0.4,  # 板块热度权重
             "lhb_quality": 0.2,  # 龙虎榜席位质量权重
-            "seal_amount": 0.2,  # 封板金额权重
+            "seal_amount": 0.3,  # 封板金额权重
         },
         # 龙虎榜知名席位名单（可配置）
-        "famous_offices": ["赵老哥", "章盟主", "方新侠", "机构专用"],
-        # 板块热度阈值（高于此值视为热门）
-        "sector_heat_threshold": 80,
+        "famous_offices": ["赵老哥", "章盟主", "方新侠", "机构专用"]
     }
 
     @classmethod
@@ -71,11 +69,11 @@ class ScoringStrategy:
         return min(lhb_score * 0.3, 15) + (5 if row.get('has_institution') else 0)
 
     @classmethod
-    def calculate_total_score(cls, row: pd.Series, sector_heat_map: Dict[str, float]) -> float:
+    def calculate_total_score(cls, row: pd.Series, sector_stocks_map: Dict) -> float:
         """
         计算股票综合得分（0-100分）
         :param row: 单只股票数据，需包含字段 ['limit_count', 'seal_amount', 'lhb_offices']
-        :param sector_heat_map: 板块热度字典 {板块名: 热度分}
+        :param sector_stocks_map: 板块热度字典 {板块名: 热度分}
         :return: 综合得分
         """
         try:
@@ -83,18 +81,17 @@ class ScoringStrategy:
             # 1. 连板层级得分（0-30分）
             # ------------------------------
             # 首板=20分，二板=30分，其他=0分
-            board_score = 20 if row['limit_count'] == 1 else 30 if row['limit_count'] == 2 else 0
+            board_score = 50 if row['limit_count'] == 1 else 100 if row['limit_count'] == 2 else 0
 
             # ------------------------------
             # 2. 板块热度得分（0-30分）
             # ------------------------------
-            sector_score = 0
-            for sector in row.get('hot_sectors', []):
-                sector_name = sector[0]  # 假设格式为 (板块名, 得分)
-                heat = sector_heat_map.get(sector_name, 0)
-                if heat >= cls._CONFIG["sector_heat_threshold"]:
-                    sector_score += min(heat, 100)  # 单板块最多100分
-            sector_score = min(sector_score, 30)  # 板块总分不超过30分
+            code = str(row['code']).zfill(6)  # 强制转为6位字符串
+            sector_count = 0
+            for sector_key, codes in sector_stocks_map.items():
+                if code in codes:
+                    sector_count += 1
+            sector_score = min(sector_count * 50, 100)
 
             # ------------------------------
             # 3. 龙虎榜席位质量得分（0-20分）
@@ -102,14 +99,14 @@ class ScoringStrategy:
             lhb_score = 0
             for office in row.get('lhb_offices', []):
                 if office in cls._CONFIG["famous_offices"]:
-                    lhb_score += 5  # 每个知名席位加5分
-            lhb_score = min(lhb_score, 20)  # 总分不超过20分
+                    lhb_score += 20  # 每个知名席位加5分
+            lhb_score = min(lhb_score, 100)  # 总分不超过20分
 
             # ------------------------------
             # 4. 封板金额得分（0-20分）
             # ------------------------------
             # 封板金额单位：亿元，得分=金额*10（如2亿→20分）
-            amount_score = min(row['seal_amount'] / 1e8 * 10, 20)
+            amount_score = min(row['seal_amount'] / 3e7 * 10, 100)
 
             # ------------------------------
             # 综合加权得分

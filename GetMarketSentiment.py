@@ -7,6 +7,7 @@ import logging
 from dataclasses import dataclass
 import time
 from GetTradeDate import TradeCalendar
+from pathlib import Path
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -49,6 +50,8 @@ class MarketSentimentAnalyzer:
         self._limit_stats: Optional[Dict] = None
         self._listing_dates = {}
         self.new_stock_threshold: int = 5  # 上市天数阈值（交易日）
+        self.index_cache = {}
+        self.zt_cache = {}
 
         self.market_amplitude = {
             'main_board': 0.18,  # 主板60/00开头
@@ -233,6 +236,7 @@ class MarketSentimentAnalyzer:
 
     def fetch_index_data(self) -> Dict:
         """获取并处理指数数据"""
+
         index_data = {}
 
         for index_code, weight in self.config.index_weights.items():

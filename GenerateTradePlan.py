@@ -236,19 +236,25 @@ class TradePlanGenerator:
             if zt_df.empty:
                 raise ValueError("涨停数据为空")
 
+            lhb_data = data_pack.get('lhb_data', pd.DataFrame())
+
+            # 计算龙虎榜评分并合并到涨停数据
+            if not lhb_data.empty:
+                lhb_scores = self._calculate_lhb_scores(lhb_data)
+                zt_df['lhb_score'] = zt_df['code'].map(lhb_scores).fillna(0)
+            else:
+                zt_df['lhb_score'] = 0  # 无数据时填充默认值
+
             # 2. 过滤首板/二板
             filtered = FilterStrategy.filter_early_boards(zt_df)
 
-            # 3. 构建板块热度字典（格式: {'CAR-T细胞疗法': 85, '贵金属': 90}）
-            sector_heat_map = {
-                sector_info[0]: sector_info[2]  # (板块名, 类型, 涨幅) → 提取板块名和涨幅
-                for sector_info in data_pack.get('sectors', [])
-            }
-            print(f'sector_heat_map:\n{sector_heat_map}')
+            # 获取热点板块成分股映射
+            hot_sectors = data_pack.get('sectors', [])
+            sector_stocks_map = self.sector_analyzer.build_sector_map(hot_sectors)
 
             # 4. 计算综合得分（关键修复：传递 sector_heat_map）
             filtered['total_score'] = filtered.apply(
-                lambda row: ScoringStrategy.calculate_total_score(row, sector_heat_map),
+                lambda row: ScoringStrategy.calculate_total_score(row, sector_stocks_map),
                 axis=1
             )
             print(f'filtered:\n {filtered}')
@@ -318,6 +324,7 @@ class TradePlanGenerator:
             # 填充龙虎榜数据
             if 'lhb_data' in data_pack and not data_pack['lhb_data'].empty:
                 plan['lhb_insights'] = self._extract_lhb_insights(data_pack['lhb_data'])
+            print(f"candidates:\n{candidates}")
         except Exception as e:
             logger.error(f"计划编译异常: {str(e)}")
 
@@ -405,17 +412,25 @@ class TradePlanGenerator:
     def _get_capital_reason(self, row: pd.Series) -> str:
         """生成资金面理由"""
         parts = []
-        if row['lhb_score'] > 70:
+        # 使用 get 方法避免 KeyError，并设置默认值
+        lhb_score = row.get('lhb_score', 0)
+        if lhb_score > 70:
             parts.append("龙虎榜资金青睐")
-        if row.get('has_institution'):
+
+        # 检查是否存在机构席位字段
+        has_institution = row.get('has_institution', False)
+        if has_institution:
             parts.append("机构席位参与")
+
         return "，".join(parts) if parts else "资金持续流入"
 
     def _get_sector_reason(self, row: pd.Series) -> str:
         """生成板块理由"""
         try:
             # 处理可能的缺失列或空值
+            print(f"row:\n{row}")
             sectors = row.get('hot_sectors', [])
+            print(f"sectors:\n{sectors}")
             if not isinstance(sectors, list) or len(sectors) == 0:
                 return ""
 

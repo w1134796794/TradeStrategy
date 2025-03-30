@@ -6,11 +6,14 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Tuple, Dict, Set
 import logging
 from GetTradeDate import TradeCalendar
+import json
+from pathlib import Path
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 pd.set_option('display.max_columns', None)
+
 
 class SectorAnalyzer:
     """热门板块分析器（优化版）"""
@@ -20,6 +23,8 @@ class SectorAnalyzer:
         初始化分析器
         :param trade_date: 交易日（格式：YYYYMMDD），默认取最近交易日
         """
+        self.cache_dir = Path("sector_cache")
+        self.cache_dir.mkdir(exist_ok=True)
         self.calender = TradeCalendar()
         self.trade_date = trade_date or self._get_recent_trade_date()
         self.sector_stocks_map: Dict[Tuple[str, str], Set[str]] = {}
@@ -216,30 +221,53 @@ class SectorAnalyzer:
             logger.error(f"获取[{sector_type}]板块[{sector_name}]成分股异常: {str(e)}", exc_info=True)
             return set()
 
-    def build_sector_map(self, hot_sectors: List, max_workers: int = 5) -> Dict:
-        """构建板块成分股映射（增强版）"""
+    def build_sector_map(self, hot_sectors: list) -> dict:
+        """构建板块映射并缓存（键类型已修复）"""
+        cache_file = self.cache_dir / f"sector_map_{self.trade_date}.json"
+
+        # 尝试读取缓存
+        if cache_file.exists():
+            try:
+                with open(cache_file, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except (json.JSONDecodeError, UnicodeDecodeError) as e:
+                logger.error(f"缓存文件损坏: {str(e)}，重新生成")
+                cache_file.unlink()
+
+        # 重新构建并写入缓存
+        sector_map = self._build_map(hot_sectors)
+        with open(cache_file, "w", encoding="utf-8") as f:
+            json.dump(
+                sector_map,
+                f,
+                indent=2,
+                ensure_ascii=False,
+                default=str  # 处理其他非 JSON 类型
+            )
+        return sector_map
+
+    def _build_map(self, hot_sectors: List, max_workers: int = 5) -> Dict:
+        """构建板块成分股映射（键类型修复版）"""
+        sector_map = {}
+        failed_sectors = []
+
         if not hot_sectors:
             logger.warning("无热门板块数据")
             return {}
 
-        sector_map = {}
-        failed_sectors = []
-
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            # 修改点：遍历时解包三个参数，忽略第三个得分参数
             futures = {
                 executor.submit(self._get_sector_components, name, sector_type): (name, sector_type)
-                for name, sector_type, _ in hot_sectors  # 关键修复：添加 _, 解包三个参数
+                for name, sector_type, _ in hot_sectors
             }
 
-            # 处理完成的任务
             for future in as_completed(futures):
                 sector_name, sector_type = futures[future]
                 try:
                     codes = future.result()
                     if codes:
-                        sector_map[(sector_name, sector_type)] = codes
-                        logger.debug(f"成功处理板块[{sector_name}]，获取{len(codes)}成分股")
+                        key = f"{sector_name}_{sector_type}"
+                        sector_map[key] = list(codes)  # 关键修复：set → list
                     else:
                         failed_sectors.append((sector_name, sector_type))
                         logger.warning(f"板块[{sector_name}]未获取到有效成分股")

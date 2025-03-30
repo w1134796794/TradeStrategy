@@ -1,4 +1,21 @@
 from GenerateTradePlan import TradePlanGenerator
+import time
+from pathlib import Path
+import json
+
+
+def main():
+    cache_file = Path("last_plan.json")
+    if cache_file.exists() and (time.time() - cache_file.stat().st_mtime < 300):
+        with open(cache_file, "r") as f:
+            plan = json.load(f)
+    else:
+        generator = TradePlanGenerator()
+        plan = generator.generate_daily_plan()
+        with open(cache_file, "w") as f:
+            json.dump(plan, f)
+    print(f"== 交易计划 {plan['plan_date']} ==")
+
 
 if __name__ == "__main__":
     generator = TradePlanGenerator()
