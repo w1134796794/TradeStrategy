@@ -3,6 +3,7 @@ import akshare as ak
 import pandas as pd
 import logging
 import bisect
+from functools import lru_cache
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +18,6 @@ class TradeCalendar:
         self.trade_dates = self._load_trade_dates()
         self.sorted_dates = sorted(self.trade_dates) if self.trade_dates else []
         logger.debug(f"加载交易日历数据: {self.sorted_dates[-5:]}")  # 显示最近5个交易日
-
 
     def is_trade_date(self, date_str: str) -> bool:
         """
@@ -35,21 +35,23 @@ class TradeCalendar:
         except:
             return False
 
-    def _load_trade_dates(self):
-        """加载交易日数据"""
+    @lru_cache(maxsize=1)
+    def _load_trade_dates(self) -> list:
+        """加载交易日数据并缓存"""
         try:
+            today = datetime.now().strftime("%Y%m%d")
             df = ak.tool_trade_date_hist_sina()
             df['trade_date'] = pd.to_datetime(df['trade_date'])
-            return [d.strftime("%Y%m%d") for d in df['trade_date']]
+            dates = [d.strftime("%Y%m%d") for d in df['trade_date']]
+            logger.info(f"交易日历已更新（截止至{today}）")
+            return dates
         except Exception as e:
-            logger.error(f"接口请求失败: {str(e)}，使用本地数据")
-            # 示例数据包含2025-03-26和2025-03-27
+            logger.error(f"接口请求失败，使用本地缓存示例数据: {str(e)}")
             return ['20250325', '20250326', '20250327', '20250328', '20250331']
 
-    def _load_local_calendar(self):
-        return [
-            '20250303', '20250304', '20250305', '20250306', '20250307'  # 新增测试数据
-        ]
+    def clear_cache(self):
+        """每日收盘后手动清理缓存"""
+        self._load_trade_dates.cache_clear()
 
     def get_recent_trade_date(self):
         """获取最近的有效交易日（精确匹配优化版）"""
