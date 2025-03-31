@@ -162,7 +162,7 @@ class TradeCalendar:
 
 # 测试示例
 if __name__ == "__main__":
-
     calendar = TradeCalendar()
+    calendar.clear_cache()
 
 
