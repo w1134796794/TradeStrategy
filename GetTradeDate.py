@@ -36,7 +36,7 @@ class LocalTradeCalendar:
             if not dates or len(dates[0]) != 8:
                 raise ValueError("交易日数据格式异常")
 
-            logger.info(f"成功加载本地交易日历（{len(dates)}条，最近5条：{dates[-5:]}）")
+            logger.info(f"成功加载本地交易日历（{len(dates)}条）")
             return dates
 
         except Exception as e:
@@ -46,7 +46,7 @@ class LocalTradeCalendar:
     def _log_initialization(self):
         """初始化日志输出"""
         if self.sorted_dates:
-            logger.debug(f"交易日历已加载：最早={self.sorted_dates[0]}, 最近={self.sorted_dates[-1]}")
+            logger.debug(f"交易日历已加载!")
         else:
             logger.error("警告：无任何交易日数据，所有查询将返回异常")
 
