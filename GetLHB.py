@@ -1,7 +1,7 @@
 import akshare as ak
 import pandas as pd
 from typing import List
-from GetTradeDate import TradeCalendar
+from GetTradeDate import LocalTradeCalendar
 from functools import lru_cache
 
 from Cache_Manager import default_cache
@@ -19,7 +19,7 @@ class LHBProcessor:
     def __init__(self, max_retry: int = 3):
         self.max_retry = max_retry
         self.statistics_cache = {}
-        self.calendar = TradeCalendar()
+        self.calendar = LocalTradeCalendar()
 
     @lru_cache(maxsize=3)  # 缓存最近3个周期的数据
     def _get_statistic_data(self, period: str = "近一月") -> pd.DataFrame:
