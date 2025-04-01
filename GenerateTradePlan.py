@@ -1,15 +1,14 @@
 from datetime import datetime
 import pandas as pd
 import logging
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from GetLHB import LHBProcessor
 from GetMarketSentiment import MarketSentimentAnalyzer
 from GetHotSectors import SectorAnalyzer
 from GetTradeDate import TradeCalendar
 from Strategies import ScoringStrategy, PositionStrategy, RiskControlStrategy, FilterStrategy
-from typing import List, Tuple, Dict, Set
+from typing import List, Dict
 import akshare as ak
-from concurrent.futures import as_completed
 from Cache_Manager import default_cache
 
 logging.basicConfig(level=logging.INFO)
@@ -60,17 +59,22 @@ class TradePlanGenerator:
         """获取数据日期和计划日期"""
         now = datetime.now()
         current_date = now.strftime("%Y%m%d")
+        current_time = now.time()
 
         if self.is_market_hours():
             # 交易时段使用当日数据
             data_date = self.calendar.get_previous_trade_date(current_date)
             plan_date = current_date
         else:
-            # 非交易时段
             if current_date in self.calendar.sorted_dates:
-                # 当天是交易日，但非交易时段
-                data_date = self.calendar.get_previous_trade_date(current_date)
-                plan_date = current_date
+                if current_time >= datetime.strptime("15:00", "%H:%M").time():
+                    # 当天是交易日，且时间在 15:00 之后
+                    data_date = current_date
+                    plan_date = self.calendar.get_next_trade_date(current_date)
+                else:
+                    # 当天是交易日，但时间在 15:00 之前
+                    data_date = self.calendar.get_previous_trade_date(current_date)
+                    plan_date = current_date
             else:
                 # 当天非交易日
                 plan_date = self.calendar.get_next_trade_date()
@@ -82,19 +86,8 @@ class TradePlanGenerator:
     def is_market_hours(self):
         """判断当前是否在交易时段内（9:30-15:00）"""
         now = datetime.now().time()
-        # 假设交易时段为9:30-15:00
+        # 假设交易时段为 9:30-15:00
         return (now >= datetime.strptime("09:30", "%H:%M").time() and now <= datetime.strptime("15:00", "%H:%M").time())
-
-    def should_generate_next_day_plan(self):
-        """判断是否需要生成次日计划"""
-        now = datetime.now()
-        current_time = now.time()
-        # 条件1：交易时段外（15:00后）
-        # 条件2：周末且周五收盘后
-        return (
-                (not self.is_market_hours()) or
-                (now.weekday() >= 5)  # 周六/周日
-        )
 
     def _analyze_market(self, data_date: str) -> dict:
         """健壮的市场分析方法"""
@@ -286,7 +279,7 @@ class TradePlanGenerator:
                 lambda row: ScoringStrategy.calculate_total_score(row, sector_stocks_map),
                 axis=1
             )
-            print(f'filtered:\n {filtered}')
+
             # 5. 按得分排序并返回 Top N
             return (
                 filtered[filtered['total_score'] >= self.params['min_score']]
