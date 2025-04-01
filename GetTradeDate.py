@@ -1,100 +1,90 @@
 from datetime import datetime
-import akshare as ak
 import pandas as pd
 import logging
 import bisect
 from functools import lru_cache
+import os
 
 logger = logging.getLogger(__name__)
 
 
-class TradeCalendar:
+class LocalTradeCalendar:
     """
-    获取最近的交易日：get_recent_trade_date
-    获取前N个交易日,默认前一个交易日：get_previous_trade_date
-    获取下一个交易日：get_next_trade_date
+    本地交易日历管理（优先读取本地CSV，支持手动更新）
+    包含：最近交易日/前后N交易日/区间交易日查询
     """
-    def __init__(self):
-        self.trade_dates = self._load_trade_dates()
-        self.sorted_dates = sorted(self.trade_dates) if self.trade_dates else []
-        logger.debug(f"加载交易日历数据: {self.sorted_dates[-5:]}")  # 显示最近5个交易日
+    CSV_PATH = './data/sse_trading_days_2025.csv'  # 固定本地路径
+    CACHE_EXAMPLE = ['20250325', '20250326', '20250327', '20250328', '20250331']  # 最小可用缓存
 
-    def is_trade_date(self, date_str: str) -> bool:
-        """
-        验证日期是否为交易日
-        :param date_str: 日期字符串（支持格式：YYYY-MM-DD 或 YYYYMMDD）
-        :return: bool
-        """
-        try:
-            # 统一格式处理
-            if '-' in date_str:
-                fmt_date = datetime.strptime(date_str, "%Y-%m-%d").strftime("%Y%m%d")
-            else:
-                fmt_date = date_str
-            return fmt_date in self.sorted_dates
-        except:
-            return False
+    def __init__(self):
+        self.trade_dates = self._load_local_dates()
+        self.sorted_dates = sorted(self.trade_dates) if self.trade_dates else []
+        self._log_initialization()
 
     @lru_cache(maxsize=1)
-    def _load_trade_dates(self) -> list:
-        """加载交易日数据并缓存"""
+    def _load_local_dates(self) -> list:
+        """优先读取本地CSV，失败时使用缓存示例"""
         try:
-            today = datetime.now().strftime("%Y%m%d")
-            df = ak.tool_trade_date_hist_sina()
-            df['trade_date'] = pd.to_datetime(df['trade_date'])
-            dates = [d.strftime("%Y%m%d") for d in df['trade_date']]
-            logger.info(f"交易日历已更新（截止至{today}）")
+            if not os.path.exists(self.CSV_PATH):
+                raise FileNotFoundError("本地交易日文件不存在")
+
+            # 读取CSV并转换日期格式
+            df = pd.read_csv(self.CSV_PATH, dtype={'trading_date': str})
+            dates = df['trading_date'].tolist()
+
+            # 校验数据完整性
+            if not dates or len(dates[0]) != 8:
+                raise ValueError("交易日数据格式异常")
+
+            logger.info(f"成功加载本地交易日历（{len(dates)}条，最近5条：{dates[-5:]}）")
             return dates
+
         except Exception as e:
-            logger.error(f"接口请求失败，使用本地缓存示例数据: {str(e)}")
-            return ['20250325', '20250326', '20250327', '20250328', '20250331']
+            logger.warning(f"本地文件加载失败，使用缓存示例数据：{str(e)}")
+            return self.CACHE_EXAMPLE  # 提供最小可用集合
+
+    def _log_initialization(self):
+        """初始化日志输出"""
+        if self.sorted_dates:
+            logger.debug(f"交易日历已加载：最早={self.sorted_dates[0]}, 最近={self.sorted_dates[-1]}")
+        else:
+            logger.error("警告：无任何交易日数据，所有查询将返回异常")
 
     def clear_cache(self):
-        """每日收盘后手动清理缓存"""
-        self._load_trade_dates.cache_clear()
+        """手动触发缓存更新（需配合文件更新）"""
+        self._load_local_dates.cache_clear()
+        self.trade_dates = self._load_local_dates()
+        self.sorted_dates = sorted(self.trade_dates)
 
+    # 以下为核心查询方法（保留原有逻辑，优化参数校验）
     def get_recent_trade_date(self):
-        """获取最近的有效交易日（精确匹配优化版）"""
-        if not self.sorted_dates:
-            raise ValueError("无可用交易日数据")
-
-        check_date = datetime.now()
-        if isinstance(check_date, datetime):
-            check_str = check_date.strftime("%Y%m%d")
-        else:
-            check_str = str(check_date)
-
-        # 使用二分查找精确匹配
-        index = bisect.bisect_left(self.sorted_dates, check_str)
-
-        # 情况1：找到精确匹配
-        if index < len(self.sorted_dates) and self.sorted_dates[index] == check_str:
-            return check_str
-
-        # 情况2：返回前一个有效交易日
-        return self.sorted_dates[index - 1] if index > 0 else None
+        """获取最近交易日（含今日匹配）"""
+        if not self.sorted_dates: return None
+        today = datetime.now().strftime("%Y%m%d")
+        idx = bisect.bisect_right(self.sorted_dates, today) - 1
+        return self.sorted_dates[idx] if idx >= 0 else None
 
     def get_previous_trade_date(self, base_date=None, days=1):
-        """
-        获取基准日期前N个交易日
-        :param base_date: 基准日期（默认当天）
-        :param days: 向前追溯天数
-        :return: 日期字符串（格式：YYYYMMDD）
-        """
-        if not self.sorted_dates:
-            raise ValueError("无可用交易日数据")
+        """获取前N个交易日（支持日期字符串/None）"""
+        base = self._parse_date(base_date) or self.get_recent_trade_date()
+        if not base: return None
 
-        # 处理基准日期
-        if base_date is None:
-            base_str = datetime.now().strftime("%Y%m%d")
-        elif isinstance(base_date, datetime):
-            base_str = base_date.strftime("%Y%m%d")
-        else:
-            base_str = str(base_date)
+        idx = bisect.bisect_left(self.sorted_dates, base)
+        return self.sorted_dates[idx - days] if (idx - days) >= 0 else None
 
-        index = bisect.bisect_left(self.sorted_dates, base_date)
-        if index > 0:
-            return self.sorted_dates[index - days]
+    def get_next_trade_date(self, base_date=None):
+        """获取下一个交易日（支持日期字符串/None）"""
+        base = self._parse_date(base_date) or datetime.now().strftime("%Y%m%d")
+        idx = bisect.bisect_right(self.sorted_dates, base)
+        return self.sorted_dates[idx] if idx < len(self.sorted_dates) else None
+
+    # 新增辅助方法
+    def _parse_date(self, date) -> str:
+        """统一日期格式解析"""
+        if isinstance(date, datetime):
+            return date.strftime("%Y%m%d")
+        if isinstance(date, str):
+            return date.replace("-", "") if len(date) == 10 else date
         return None
 
     def get_trade_days(self, start_date: str, end_date: str) -> list:
@@ -127,42 +117,19 @@ class TradeCalendar:
         trade_days = self.get_trade_days(start_date, end_date)
         return len(trade_days)
 
-    def get_next_trade_date(self, base_date=None) -> None:
-        """
-        获取基准日期的下一个交易日
-        :param base_date: 基准日期（支持格式：YYYY-MM-DD、YYYYMMDD 或 datetime 对象，默认当天）
-        :return: 下一个交易日的字符串（格式：YYYYMMDD），如果已经是最后交易日返回None
-        """
-        if base_date is None:
-            base_date = datetime.now().strftime("%Y%m%d")
 
-        if not self.sorted_dates:
-            raise ValueError("无可用交易日数据")
-
-        # 处理基准日期格式
-        if base_date is None:
-            base_str = datetime.now().strftime("%Y%m%d")
-        elif isinstance(base_date, datetime):
-            base_str = base_date.strftime("%Y%m%d")
-        else:
-            base_str = str(base_date).replace("-", "")  # 统一为YYYYMMDD格式
-
-        index = bisect.bisect_left(self.sorted_dates, base_date)
-        if index < len(self.sorted_dates):
-            next_date = self.sorted_dates[index]
-            # 处理当天就是交易日的情况
-            if next_date == base_date:
-                if index + 1 < len(self.sorted_dates):
-                    return self.sorted_dates[index + 1]
-                else:
-                    return None
-            return next_date
-        return None
-
-
-# 测试示例
+# 使用示例（保留原有测试逻辑）
 if __name__ == "__main__":
-    calendar = TradeCalendar()
-    calendar.clear_cache()
+    # 初始化日志
+    logging.basicConfig(level=logging.DEBUG)
+
+    # 初始化日历（自动读取本地文件）
+    calendar = LocalTradeCalendar()
+
+    # 测试查询
+    current_date = '20250401'
+    print(f"下一个交易日：{calendar.get_next_trade_date(current_date)}")
+    print(f"前一个交易日：{calendar.get_previous_trade_date(current_date, 3)}")
+    print(f"最近交易日：{calendar.get_recent_trade_date()}")
 
 
