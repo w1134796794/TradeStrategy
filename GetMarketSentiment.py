@@ -1,305 +1,124 @@
-import akshare as ak
 import pandas as pd
-import numpy as np
-from datetime import datetime
-from typing import Dict, Optional
 import logging
-from dataclasses import dataclass
-import time
-from GetTradeDate import TradeCalendar
-from pathlib import Path
+import akshare as ak
+from GetTradeDate import LocalTradeCalendar
+from FetchBaseData import DataPathManager
+from typing import Dict
+pd.set_option("display.max_columns", None)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-@dataclass
+# ==================== 配置类 ====================
 class MarketSentimentConfig:
-    """市场情绪分析配置参数"""
-    # 指数权重配置（总和建议为1）
-    index_weights = {
-        "sh000001": 0.4,  # 上证指数
-        "sz399001": 0.3,  # 深证成指
-        "sz399006": 0.3  # 创业板指
+    """市场情绪分析配置"""
+    index_weights = {"sh000001": 0.4, "sz399001": 0.3, "sz399006": 0.3}
+    score_weights = {'index': 0.4, 'breadth': 0.3, 'limit': 0.3, 'premium': 0.5}
+    max_retries: int = 3
+    retry_delay: float = 1.5
+    new_stock_threshold: int = 5  # 新股判定交易日数
+
+    # 数据文件名配置
+    DATA_FILES = {
+        'index_data': 'index_data.csv',
+        'market_breadth': 'market_breadth.csv',
+        'market_volume': 'market_volume.csv',
+        'zt_pool': 'zt_pool.csv',
+        'zt_stock_info': 'zt_stock_info.csv'
     }
 
-    # 评分模型参数
-    base_score: float = 50.0  # 基础情绪分
-    index_weight: float = 0.4  # 指数维度权重
-    breadth_weight: float = 0.3  # 市场广度权重
-    limit_weight: float = 0.3  # 连板高度权重
 
-    # 重试参数
-    max_retries: int = 3  # 接口调用重试次数
-    retry_delay: float = 1.0  # 重试间隔(秒)
-
-    # 量能权重
-    volume_weight: float = 0.2
-
-
+# ==================== 核心分析类 ====================
 class MarketSentimentAnalyzer:
-    """市场情绪分析器（优化版）"""
-    def __init__(self, config: MarketSentimentConfig = None):
+    """市场情绪分析器（本地文件加载版）"""
+
+    def __init__(self, config: MarketSentimentConfig = None, data_root: str = None):
         self.config = config or MarketSentimentConfig()
-        self.trade_date = datetime.now().strftime("%Y%m%d")
-        self.calendar = TradeCalendar()
+        self.data_mgr = DataPathManager(data_root) if data_root else None
+        self.calendar = LocalTradeCalendar()
+        self.trade_date = self.calendar.get_recent_trade_date()
 
-        # 初始化数据缓存
-        self._index_data: Optional[Dict] = None
-        self._market_breadth: Optional[Dict] = None
-        self._limit_stats: Optional[Dict] = None
+        # 初始化缓存
+        self._index_data: Dict = {}
+        self._market_breadth: Dict = {}
+        self._limit_stats: Dict = {}
         self._listing_dates = {}
-        self.new_stock_threshold: int = 5  # 上市天数阈值（交易日）
-        self.index_cache = {}
-        self.zt_cache = {}
 
-        self.market_amplitude = {
-            'main_board': 0.18,  # 主板60/00开头
-            'gem': 0.36,  # 创业板30开头
-            'star': 0.36,  # 科创板68开头
-            'bj': 0.45  # 北交所43/83/87开头
-        }
-
-        # 情绪评分参数
-        self.extreme_score_config = {
-            'sky_earth_penalty': -3,  # 天地板扣分
-            'earth_sky_bonus': 2,  # 地天板加分
-            'st_penalty_factor': 1.5  # ST股影响系数
-        }
-
+        # 指数名称映射
         self._index_name_map = {
-            "sh000001": "上证指数",
-            "sz399001": "深证成指",
-            "sz399006": "创业板指",
-            "sz399005": "中小板指",
-            "sh000016": "上证50",
-            "sh000905": "中证500",
-            "sh000300": "沪深300"
+            "sh000001": "上证指数", "sz399001": "深证成指",
+            "sz399006": "创业板指", "sh000016": "上证50"
         }
 
-    def _get_index_name(self, code: str) -> str:
-        """获取指数中文名称"""
-        return self._index_name_map.get(code, "未知指数")
-
-    def detect_extreme_boards(self) -> Dict:
-        """基于实时振幅的极端波动检测"""
-        try:
-            # 获取全市场实时行情
-            spot_df = ak.stock_zh_a_spot_em()
-        except Exception as e:
-            logger.error(f"实时行情获取失败: {str(e)}")
-            return {'sky_earth': 0, 'earth_sky': 0}
-
-        extreme_cases = {'sky_earth': 0, 'earth_sky': 0, 'details': []}
-
-        for _, row in spot_df.iterrows():
-            try:
-                # 基础数据校验
-                if self._is_new_stock(row['代码']):
-                    continue
-
-                if pd.isna(row['振幅']) or pd.isna(row['最新价']):
-                    continue
-
-                # 获取市场类型
-                market = self._get_market_type(row['代码'])
-                if market not in self.market_amplitude:
-                    continue
-
-                # 获取关键数据
-                amplitude = row['振幅'] / 100  # 转换百分比为小数
-                last_price = row['最新价']
-                prev_close = row['昨收']
-                is_st = 'ST' in row['名称']
-
-                # 计算涨跌方向
-                price_change = (last_price - prev_close) / prev_close
-
-                # 判断逻辑
-                if amplitude >= self.market_amplitude[market]:
-                    # 地天板条件：振幅达标且最新价高于昨日收盘
-                    if price_change > 0:
-                        extreme_cases['earth_sky'] += 1
-                        extreme_cases['details'].append({
-                            'code': row['代码'],
-                            'name': row['名称'],
-                            'type': '地天板',
-                            'amplitude': amplitude,
-                            'change_pct': price_change * 100
-                        })
-                    # 天地板条件：振幅达标且最新价低于昨日收盘
-                    else:
-                        extreme_cases['sky_earth'] += 1
-                        extreme_cases['details'].append({
-                            'code': row['代码'],
-                            'name': row['名称'],
-                            'type': '天地板',
-                            'amplitude': amplitude,
-                            'change_pct': price_change * 100
-                        })
-            except Exception as e:
-                logger.warning(f"处理{row['代码']}时异常: {str(e)}")
-
-        return extreme_cases
-
-    def _get_listing_date(self, symbol: str) -> Optional[datetime]:
-        """获取上市日期（带缓存）"""
-        if symbol not in self._listing_dates:
-            try:
-                # 获取股票基本信息
-                df = ak.stock_individual_info_em(symbol=symbol)
-
-                # 提取上市日期字段
-                date_row = df[df['item'] == '上市时间']
-                if date_row.empty:
-                    logger.warning(f"股票{symbol}无上市日期信息")
-                    return None
-
-                # 处理不同数据格式
-                raw_date = date_row['value'].iloc[0]
-
-                # 类型转换和格式处理
-                if isinstance(raw_date, int):  # 处理数字格式日期
-                    date_str = str(raw_date)
-                    if len(date_str) == 8:  # 格式如20230830
-                        return datetime.strptime(date_str, "%Y%m%d")
-                    else:  # 处理其他数字格式
-                        logger.warning(f"股票{symbol}异常日期格式: {raw_date}")
-                        return None
-                elif isinstance(raw_date, str):  # 处理字符串格式
-                    # 尝试多种日期格式解析
-                    for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%Y%m%d"):
-                        try:
-                            return datetime.strptime(raw_date, fmt)
-                        except ValueError:
-                            continue
-                    logger.warning(f"股票{symbol}无法解析的日期格式: {raw_date}")
-                    return None
-                else:  # 未知类型
-                    logger.warning(f"股票{symbol}日期字段类型异常: {type(raw_date)}")
-                    return None
-
-            except Exception as e:
-                logger.error(f"获取{symbol}上市日期失败: {str(e)}")
-                return None
-        return self._listing_dates[symbol]
-
-    def _is_new_stock(self, symbol: str) -> bool:
-        """判断是否为新股次新股"""
-        listing_date = self._get_listing_date(symbol)
-        if not listing_date:
-            return False  # 获取失败时不排除
-
-        # 计算实际交易日差
-        trade_days = self.calendar.get_trade_days(
-            start_date=listing_date.strftime("%Y%m%d"),
-            end_date=self.trade_date
-        )
-        return len(trade_days) <= self.new_stock_threshold
-
-    def calculate_extreme_score(self, extreme_data: Dict) -> float:
-        """计算极端波动得分"""
-        score = 0
-        # 基础得分计算
-        score += extreme_data['sky_earth'] * self.extreme_score_config['sky_earth_penalty']
-        score += extreme_data['earth_sky'] * self.extreme_score_config['earth_sky_bonus']
-
-        # ST股额外惩罚
-        st_count = sum(1 for d in extreme_data['details'] if 'ST' in d['name'])
-        score *= self.extreme_score_config['st_penalty_factor'] ** st_count
-
-        return score
-
-    def _get_market_type(self, code: str) -> str:
-        """市场类型识别"""
-        prefix_map = {
-            '60': 'main_board',
-            '00': 'main_board',
-            '30': 'gem',
-            '68': 'star',
-            '43': 'bj',
-            '83': 'bj',
-            '87': 'bj'
-        }
-        return prefix_map.get(code[:2], 'unknown')
-
-    def _safe_api_call(self, api_func, *args, **kwargs):
-        """带重试机制的API调用"""
-        for attempt in range(1, self.config.max_retries + 1):
-            try:
-                return api_func(*args, **kwargs)
-            except Exception as e:
-                logger.warning(f"接口调用第{attempt}次失败: {str(e)}")
-                if attempt == self.config.max_retries:
-                    raise
-                time.sleep(self.config.retry_delay)
-
+    # ==================== 数据获取方法 ====================
     def fetch_index_data(self) -> Dict:
-        """获取并处理指数数据"""
-
+        """从本地文件加载指数数据"""
         index_data = {}
-
-        for index_code, weight in self.config.index_weights.items():
+        for code, weight in self.config.index_weights.items():
             try:
-                df = self._safe_api_call(ak.stock_zh_index_daily, symbol=index_code)
+                # 从本地文件加载
+                file_name = MarketSentimentConfig.DATA_FILES['index_data']
+                df = self.data_mgr.load_data(file_name)
+
+                # 筛选对应的指数数据
+                df = df[df["指数代码"] == code]
+
                 if df.empty:
-                    logger.warning(f"指数{index_code}数据为空")
+                    logger.warning(f"指数{code}数据为空")
                     continue
 
-                # 计算技术指标
-                df = df.iloc[-30:]  # 保留最近30个交易日
-                df['ma5'] = df['close'].rolling(5).mean()
-                df['ma20'] = df['close'].rolling(20).mean()
+                df = df.iloc[-10:]
+                df['ma2'] = df['close'].rolling(2).mean()
+                df['ma6'] = df['close'].rolling(6).mean()
                 last = df.iloc[-1]
 
-                index_data[index_code] = {
-                    'change_pct': (last['close'] - last['open']) / last['open'] * 100,
-                    'position': 'above' if last['close'] > last['ma5'] else 'below',
-                    'trend': 'up' if last['ma5'] > last['ma20'] else 'down',
+                processed = {
+                    'change_pct': (last['close'] - df.iloc[-2]['close']) / df.iloc[-2]['close'] * 100,
+                    'position': 'above' if last['close'] > last['ma2'] else 'below',
+                    'trend': 'up' if last['ma2'] > last['ma6'] else 'down',
                     'weight': weight
                 }
 
-            except Exception as e:
-                logger.error(f"指数{index_code}数据处理失败: {str(e)}")
+                index_data[code] = processed
 
+            except Exception as e:
+                logger.error(f"加载指数{code}数据失败: {str(e)}")
         return index_data
 
     def fetch_market_breadth(self) -> Dict:
-        """获取市场广度数据"""
+        """获取市场广度数据（带缓存）"""
+
         try:
-            df = self._safe_api_call(ak.stock_market_activity_legu)
-            breadth_items = {
-                'rise_num': ('上涨', int),
-                'fall_num': ('下跌', int),
-                'limit_up': ('真实涨停', int),
-                'limit_down': ('真实跌停', int)
+            df = ak.stock_market_activity_legu()
+            result = {
+                'rise_num': int(df[df['item'] == '上涨']['value'].iloc[0]),
+                'fall_num': int(df[df['item'] == '下跌']['value'].iloc[0]),
+                'limit_up': int(df[df['item'] == '真实涨停']['value'].iloc[0]),
+                'limit_down': int(df[df['item'] == '真实跌停']['value'].iloc[0])
             }
 
-            result = {k: 0 for k in breadth_items.keys()}
-            for key, (name, dtype) in breadth_items.items():
-                try:
-                    value = df[df['item'] == name]['value'].iloc[0]
-                    result[key] = dtype(value)
-                except (IndexError, KeyError, ValueError) as e:
-                    logger.warning(f"市场广度字段[{name}]获取失败: {str(e)}")
-                    result[key] = 0
+            # 保存缓存
             return result
         except Exception as e:
-            logger.error(f"市场广度数据获取失败: {str(e)}")
-            return {k: 0 for k in breadth_items.keys()}
+            logger.error(f"市场广度获取失败: {str(e)}")
+            return {k: 0 for k in ['rise_num', 'fall_num', 'limit_up', 'limit_down']}
 
     def fetch_limit_stats(self) -> Dict:
-        """精确解析涨停统计数据"""
+        """从本地文件加载涨停统计数据"""
         try:
-            zt_data = ak.stock_zt_pool_em(date=self.trade_date)
-            if zt_data.empty:
+            file_name = MarketSentimentConfig.DATA_FILES['zt_pool']
+            df = self.data_mgr.load_data(file_name)
+
+            if df.empty:
+                logger.warning("涨停统计数据为空")
                 return {'max_limit': 0, 'distribution': {}, 'non_consecutive': []}
 
             # 调试打印前3行数据
-            logger.debug("涨停池原始数据样例:\n%s", zt_data.head(3).to_string())
+            logger.debug("涨停池原始数据样例:\n%s", df.head(3).to_string())
 
             non_consecutive = []
-            for _, row in zt_data.iterrows():
+            for _, row in df.iterrows():
                 try:
                     # 解析涨停统计字段
                     if '/' not in str(row['涨停统计']):
@@ -323,192 +142,317 @@ class MarketSentimentAnalyzer:
                     logger.warning(f"处理{row['代码']}时异常: {str(e)}")
 
             return {
-                'max_limit': zt_data['连板数'].max(),
-                'distribution': zt_data['连板数'].value_counts().to_dict(),
+                'max_limit': df['连板数'].max() if not df.empty else 0,
+                'distribution': df['连板数'].value_counts().to_dict(),
                 'non_consecutive': non_consecutive
             }
+
         except Exception as e:
-            logger.error(f"涨停数据获取失败: {str(e)}")
+            logger.error(f"加载涨停统计数据失败: {str(e)}")
             return {'max_limit': 0, 'distribution': {}, 'non_consecutive': []}
 
-    def _format_limit_stats(self) -> Dict:
-        """增强版格式化输出"""
-        stats = {
-            '最高连板数': self._limit_stats['max_limit'],
-            '连板分布': {f"{k}连板": v for k, v in self._limit_stats['distribution'].items()},
-            '特殊涨停案例': []
+    def fetch_market_volume_data(self, end_date: str, days: int = 5) -> pd.DataFrame:
+        """从本地data/csv/yyyymmdd/market_volume.csv中获取指定日期范围的市场成交量数据"""
+        date_range = self.calendar.get_recent_trade_dates(end_date, days)
+        all_data = []
+
+        for date in date_range:
+
+            file_path = f"data/csv/{date}/market_volume.csv"
+
+            try:
+                df = pd.read_csv(file_path)
+                if not df.empty:
+                    # 确保日期格式统一
+                    df['成交额'] = df['成交额'].fillna(0)
+                    df['日期'] = date
+                    # df["日期"] = df["日期"].astype(str).str.replace("-", "", regex=True)
+                    all_data.append(df)
+            except FileNotFoundError:
+                logger.warning(f"文件{file_path}不存在")
+            except Exception as e:
+                logger.error(f"加载{file_path}失败: {str(e)}")
+
+        if not all_data:
+            return pd.DataFrame()
+
+        # 合并所有数据并按日期排序
+        combined_df = pd.concat(all_data).sort_values("日期")
+        return combined_df
+
+    # ==================== 分析计算方法 ====================
+    def calculate_volume_trend(self, end_date: str, days: int = 5) -> Dict:
+        """计算指定日期范围内的市场平均成交量，并判断结束日期的成交量状态"""
+        # 加载指定日期范围的数据
+        data_df = self.fetch_market_volume_data(end_date, days)
+
+        if data_df.empty:
+            logger.warning("没有找到指定日期范围内的数据")
+            return {
+                "average_volume": 0.0,
+                "current_volume": 0.0,
+                "volume_status": "无数据",
+                "change_ratio": 0.0
+            }
+
+        # 计算每日总成交量
+        daily_volume = data_df.groupby("日期")["成交额"].sum().reset_index()
+        daily_volume["成交额"] = daily_volume["成交额"].astype(float) / 1e8
+
+        # 获取最后一天的数据
+        end_date_volume = daily_volume.iloc[-1]["成交额"]
+
+        # 计算平均成交额（不包括最后一天）
+        average_df = daily_volume.iloc[:-1]
+        if average_df.empty:
+            logger.warning("计算平均成交额的数据不足")
+            return {
+                "average_volume": 0.0,
+                "current_volume": end_date_volume,
+                "volume_status": "数据不足",
+                "change_ratio": 0.0
+            }
+
+        average_volume = average_df["成交额"].mean()
+
+        # 计算变化率
+        change_ratio = (end_date_volume - average_volume) / average_volume if average_volume != 0 else 0
+
+        # 判断成交量状态
+        if change_ratio > 0.2:
+            volume_status = "明显放量"
+        elif change_ratio > 0.1:
+            volume_status = "温和放量"
+        elif change_ratio < -0.15:
+            volume_status = "显著缩量"
+        elif change_ratio < -0.05:
+            volume_status = "轻微缩量"
+        else:
+            volume_status = "平量"
+
+        return {
+            "average_volume": round(average_volume, 2),
+            "current_volume": round(end_date_volume, 2),
+            "volume_status": volume_status,
+            "change_ratio": round(change_ratio, 4)
         }
 
-        for case in self._limit_stats['non_consecutive']:
-            stats['特殊涨停案例'].append(
-                f"{case['name']}({case['code']}): "
-                f"{case['total_days']}个交易日内{case['limit_times']}次涨停，"
-                f"最长{case['consecutive_days']}连板，"
-                f"非连续涨停{case['non_consecutive']}次"
-            )
+    def analyze_premium_effect(self, days: int = 5):
+        """分析首板溢价效应（次日开盘买入，第三日开盘卖出）"""
+        try:
+            profits = []  # 收益率列表
+            total_samples = 0  # 总样本数
 
-        return stats
+            date_list = self.calendar.get_recent_trade_dates(self.trade_date, days)
+            print(date_list)
 
-    def collect_market_data(self) -> Dict:
-        """整合市场数据"""
+            for date in date_list[:-2]:  # 需要确保有次日和第三日
+                if not date:
+                    logger.warning("遇到无效日期，终止循环")
+                    break
+
+                # 加载涨停数据
+                zt_df = self._load_zt_pool_data(date)
+                if zt_df.empty:
+                    logger.warning(f"{date}无涨停数据")
+                    continue
+
+                # 确保日期和代码列的数据类型一致
+                zt_df["日期"] = zt_df["日期"].astype(str)
+                zt_df["代码"] = zt_df["代码"].astype(str).str.zfill(6)
+
+                # 筛选首板
+                first_zt = zt_df[zt_df['连板数'] == 2]
+
+                if first_zt.empty:
+                    logger.info(f"{date}无首板股票")
+                    continue
+
+                # 获取次日和第三日的日期
+                next_date = self.calendar.get_next_trade_date(date)
+                day_after_next = self.calendar.get_next_trade_date(next_date)
+                if not next_date or not day_after_next:
+                    logger.info(f"{date}后无有效交易日")
+                    continue
+
+                # 遍历首板股票
+                for _, row in first_zt.iterrows():
+                    code = row['代码']
+                    close_price = row['最新价']
+
+                    # 跳过无效收盘价
+                    if close_price <= 0:
+                        logger.warning(f"股票{code}收盘价异常: {close_price}")
+                        continue
+
+                    # 获取次日K线数据
+                    next_day_kline = self._load_stock_hist(code, next_date)
+                    if next_day_kline.empty:
+                        logger.warning(f"股票{code}在{next_date}无数据")
+                        continue
+
+                    # 获取第三日K线数据
+                    day_after_next_kline = self._load_stock_hist(code, day_after_next)
+                    if day_after_next_kline.empty:
+                        logger.warning(f"股票{code}在{day_after_next}无数据")
+                        continue
+
+                    # 提取次日开盘价和第三日开盘价
+                    next_day_open = next_day_kline.iloc[0]['开盘']
+                    day_after_next_open = day_after_next_kline.iloc[0]['开盘']
+
+                    if next_day_open <= 0 or day_after_next_open <= 0:
+                        logger.warning(f"股票{code}开盘价异常: {next_day_open} 或 {day_after_next_open}")
+                        continue
+
+                    # 计算收益率
+                    profit_pct = (day_after_next_open / next_day_open - 1) * 100
+                    profits.append(profit_pct)
+                    total_samples += 1
+
+            # 计算统计指标
+            if total_samples == 0:
+                return {
+                    'profit_probability': 0.0,
+                    'avg_profit': 0.0,
+                    'avg_loss': 0.0,
+                    'winning_profit_rate': 0.0,
+                    'total_samples': 0
+                }
+
+            # 盈利概率
+            profit_probability = sum(1 for p in profits if p > 0) / total_samples * 100
+
+            # 平均收益率
+            avg_profit = sum(profits) / total_samples
+
+            # 盈利率
+            winning_samples = [p for p in profits if p > 0]
+            winning_profit_rate = sum(winning_samples) / len(winning_samples) if winning_samples else 0.0
+
+            # 亏损率（仅统计亏损的样本）
+            loss_samples = [p for p in profits if p < 0]
+            avg_loss = sum(loss_samples) / len(loss_samples) if loss_samples else 0.0
+
+            logger.info(f"盈利概率: {profit_probability:.2f}%")
+            logger.info(f"平均收益率: {avg_profit:.2f}%")
+            logger.info(f"亏损率: {avg_loss:.2f}% (基于 {len(loss_samples)} 个亏损样本)")
+
+            return {
+                'profit_probability': profit_probability,
+                'avg_profit': avg_profit,
+                'avg_loss': avg_loss,
+                'winning_profit_rate': winning_profit_rate,
+                'total_samples': total_samples
+            }
+
+        except Exception as e:
+            logger.error(f"溢价分析失败: {str(e)}", exc_info=True)
+            return {
+                'profit_probability': 0.0,
+                'avg_profit': 0.0,
+                'avg_loss': 0.0,
+                'winning_profit_rate': 0.0,
+                'total_samples': 0
+            }
+
+    def calculate_total_score(self) -> float:
+        """优化版市场情绪评分（集成量能分析）"""
+        try:
+            total = 0.0
+            end_date = self.calendar.get_recent_trade_date()
+
+            # ==================== 量能分析维度 (35%) ====================
+            volume_analysis = self.calculate_volume_trend(end_date, 5)
+
+            # 量能基础得分（基于变化率）
+            change_ratio = volume_analysis['change_ratio']
+            if change_ratio > 0.2:
+                vol_base = 25  # 明显放量
+            elif change_ratio > 0.1:
+                vol_base = 20  # 温和放量
+            elif change_ratio < -0.15:
+                vol_base = 5  # 显著缩量
+            elif change_ratio < -0.05:
+                vol_base = 10  # 轻微缩量
+            else:
+                vol_base = 15  # 平量
+
+            # 量能趋势得分（结合近期趋势）
+            trend_score = 0
+            if volume_analysis['current_volume'] > volume_analysis['average_volume']:
+                # 每高500亿加5分
+                trend_score = (volume_analysis['current_volume'] - volume_analysis['average_volume']) / 500 * 5
+
+            total += min((vol_base + trend_score), 35)
+
+            # ==================== 市场热度维度 (50%) ====================
+            breadth = self._market_breadth
+            valid_stocks = breadth['rise_num'] + breadth['fall_num']
+
+            # 上涨强度得分
+            rise_strength = 0
+            if valid_stocks > 0:
+                rise_ratio = breadth['rise_num'] / valid_stocks
+                # 上涨家数比例越高得分越高，最高30分
+                rise_strength = min(rise_ratio * 50, 30)
+
+                # 普涨加成（上涨家数>3000）
+                if breadth['rise_num'] > 3500:
+                    rise_strength += 10
+
+            # 涨停效应得分
+            limit_score = breadth['limit_up'] * 0.3  # 每个涨停+0.3
+            # 跌停惩罚
+            down_penalty = -breadth['limit_down']  # 每个跌停-1
+
+            total += min((rise_strength + limit_score + down_penalty), 50)
+
+            # ==================== 指数协同维度 (最高15分) ====================
+            index_gain = sum(data['change_pct'] * data['weight'] for data in self._index_data.values())
+
+            # 指数涨幅基础分
+            index_base = min(max(index_gain * 5, 0), 10)  # 1%涨幅=5分，最高10分
+
+            # 量价配合加分
+            volume_bonus = 0
+            if index_gain > 0.5 and volume_analysis['vol_status'] in ["明显放量", "温和放量"]:
+                volume_bonus = 5  # 放量上涨额外加5分
+
+            total += min(index_base + volume_bonus, 15)  # 指数协同维度最高15分
+
+            return min(max(round(total, 1), 0), 100)  # 确保0-100区间
+
+        except Exception as e:
+            logger.error(f"评分计算失败: {str(e)}", exc_info=True)
+            return 0.0
+
+    # ==================== 主流程方法 ====================
+    def generate_report(self) -> Dict:
+        """生成完整市场情绪报告（基于本地文件）"""
+        # 数据采集
         self._index_data = self.fetch_index_data()
         self._market_breadth = self.fetch_market_breadth()
         self._limit_stats = self.fetch_limit_stats()
 
-        if self.trade_date:
-            prev_date = self.calendar.get_previous_trade_date(self.trade_date)
+        # 计算得分
+        total_score = self.calculate_total_score()
+        # 计算高开和低开的溢价率
+        premium_effect = self.analyze_premium_effect()
 
         return {
-            'index_data': self._index_data,
-            'market_breadth': self._market_breadth,
+            'trade_date': self.trade_date,
+            'total_score': total_score,
+            'sentiment_level': self._get_sentiment_label(total_score),
+            'index_data': self._format_index_data(),
+            'breadth_data': self._market_breadth,
             'limit_stats': self._limit_stats,
-            'trade_date': self.trade_date
+            'premium_effect': premium_effect
         }
 
-    def calculate_index_score(self) -> float:
-        """计算指数维度得分"""
-        total_score = 0.0
-
-        for code, data in self._index_data.items():
-            weight = data.get('weight', 0)
-
-            # 趋势评分（0-20分）
-            trend_score = 20 if data['trend'] == 'up' else 0
-
-            # 位置评分（0-10分）
-            position_score = 10 if data['position'] == 'above' else 0
-
-            # 涨跌幅评分（-20~20分）
-            change_score = max(min(data['change_pct'] * 2, 20), -20)
-
-            # 加权计算
-            total_score += (trend_score + position_score + change_score) * weight
-
-        return total_score * self.config.index_weight
-
-    def calculate_breadth_score(self) -> float:
-        """计算市场广度得分"""
-        breadth = self._market_breadth
-
-        # 上涨比例得分（0-30分）
-        rise_ratio = breadth['rise_num'] / max(breadth['rise_num'] + breadth['fall_num'], 1)
-        rise_score = min(rise_ratio * 100, 30)
-
-        # 涨跌停比得分（0-20分）
-        limit_ratio = breadth['limit_up'] / max(breadth['limit_down'], 1)
-        limit_score = min(np.log1p(limit_ratio) * 10, 20)  # 使用对数压缩量级
-
-        # 涨停数量奖励分
-        bonus_score = 10 if breadth['limit_up'] > 50 else 0
-
-        return (rise_score + limit_score + bonus_score) * self.config.breadth_weight
-
-    def calculate_limit_score(self) -> float:
-        """计算连板高度得分"""
-        stats = self._limit_stats
-
-        # 最高连板得分（0-15分）
-        max_score = min(stats['max_limit'] * 5, 15)
-
-        # 连板分布得分（0-10分）
-        mid_limit = sum(count for limit, count in stats['distribution'].items() if 3 <= limit < 7)
-        distribution_score = 10 if mid_limit > 5 else 5 if mid_limit > 3 else 0
-
-        return (max_score + distribution_score) * self.config.limit_weight
-
-    def get_sentiment_label(self, score: float) -> str:
-        """根据评分获取情绪标签"""
-        if score >= 80:
-            return "亢奋"
-        elif score >= 60:
-            return "乐观"
-        elif score >= 40:
-            return "谨慎"
-        else:
-            return "恐慌"
-
-    def calculate_total_score(self) -> float:
-        """计算综合情绪评分"""
-        try:
-            breadth = self._market_breadth
-            limit_stats = self._limit_stats
-
-            # 添加空值保护
-            if not breadth or not limit_stats:
-                raise ValueError("市场数据未正确初始化")
-
-            total_rise_fall = breadth.get('rise_num', 0) + breadth.get('fall_num', 0)
-
-            score = 0
-            # 涨停数量贡献（最多40分）
-            score += min(breadth.get('limit_up', 0) * 2, 40)
-            # 上涨比例贡献
-            score += (breadth.get('rise_num', 0) / (total_rise_fall + 1e-6)) * 30
-            # 最高连板数贡献
-            score += min(limit_stats.get('max_limit', 0) * 5, 30)
-            return round(score, 1)
-        except Exception as e:
-            logger.error(f"情绪分计算失败: {str(e)}")
-            return 0.0
-
-    def generate_report(self) -> Dict:
-        """生成分析报告"""
-        # 确保数据被收集
-        self.collect_market_data()
-
-        score = self.calculate_total_score()
-
-        return {
-            '交易日期': self.trade_date,
-            '综合情绪分': round(score, 1),
-            '得分明细': {
-                '指数维度得分': round(self.calculate_index_score(), 1),
-                '市场广度得分': round(self.calculate_breadth_score(), 1),
-                '连板高度得分': round(self.calculate_limit_score(), 1)
-            },
-            '市场数据': {
-                '指数数据': self._format_index_data(),
-                '涨跌统计': self._format_market_breadth(),
-                '涨停分析': self._format_limit_stats()
-            },
-            '情绪级别': self._get_sentiment_label(score),
-            '术语说明': self._get_glossary()
-        }
-
-    def _get_glossary(self) -> Dict:
-        """术语说明字典"""
-        return {
-            '连板数': "指连续涨停天数，例如3连板表示连续3个交易日涨停",
-            '非连续涨停': "例如8天5板表示在8个交易日内有5日涨停，但未形成连续涨停",
-            '新股过滤': "已排除上市未满60个交易日的股票（涨跌幅规则不同）",
-            '有效涨停': "剔除新股、ST股后的真实涨停统计"
-        }
-
-    def _format_index_data(self) -> Dict:
-        """格式化指数数据为中文"""
-        formatted = {}
-        for code, data in self._index_data.items():
-            formatted[code] = {
-                '名称': self._get_index_name(code),
-                '当日涨跌幅': f"{data['change_pct']:.2f}%",
-                '均线位置': "5日均线上方" if data['position'] == 'above' else "5日均线下方",
-                '趋势方向': "上升趋势" if data['trend'] == 'up' else "下降趋势",
-                '权重占比': f"{data['weight'] * 100:.1f}%"
-            }
-        return formatted
-
-    def _format_market_breadth(self) -> Dict:
-        """格式化市场广度数据"""
-        return {
-            '上涨家数': self._market_breadth['rise_num'],
-            '下跌家数': self._market_breadth['fall_num'],
-            '涨停数量': self._market_breadth['limit_up'],
-            '跌停数量': self._market_breadth['limit_down'],
-            '涨跌比': f"{self._market_breadth['rise_num'] / self._market_breadth['fall_num']:.2f}:1"
-            if self._market_breadth['fall_num'] > 0 else "N/A"
-        }
-
-    def _get_sentiment_label(self, score: float) -> str:
+    # ==================== 辅助方法 ====================
+    @staticmethod
+    def _get_sentiment_label(score: float) -> str:
         """根据评分获取情绪级别"""
         if score >= 80:
             return "极度乐观"
@@ -521,109 +465,59 @@ class MarketSentimentAnalyzer:
         else:
             return "悲观"
 
-    def analyze_premium_effect(self, days=5):
-        """
-        分析首板次日的溢价效应
-        :return: 近期首板次日平均溢价率
-        """
-        try:
-            premiums = []
-            # 获取起始日期：调整为前days个交易日
-            start_date = self.calendar.get_previous_trade_date(self.trade_date, days)
-            current_date = start_date
+    def _format_index_data(self) -> Dict:
+        """格式化指数数据为中文"""
+        formatted = {}
+        for code, data in self._index_data.items():
+            formatted[code] = {
+                '名称': self._index_name_map.get(code, "未知指数"),
+                '当日涨跌幅': f"{data.get('change_pct', 0.0):.2f}%",
+                '均线位置': "5日均线上方" if data.get('position') == 'above' else "5日均线下方",
+                '趋势方向': "上升趋势" if data.get('trend') == 'up' else "下降趋势",
+                '权重占比': f"{data.get('weight', 0.0) * 100:.1f}%"
+            }
+        return formatted
 
-            logger.info(f"分析起始日期: {current_date}, 共分析{days}个交易日")
+    def _load_zt_pool_data(self, date_str: str) -> pd.DataFrame:
+        """从本地加载指定日期的涨停数据"""
+        file_name = f"zt_pool_hist.csv"
+        zt_df = self.data_mgr.load_data(file_name)
+        zt_df['代码'] = zt_df['代码'].astype(str).str.zfill(6)
+        zt_df["日期"] = zt_df["日期"].astype(str)
+        zt_df = zt_df[zt_df["日期"] == date_str]
 
-            for _ in range(days):
-                if not current_date:
-                    logger.warning("遇到无效日期，终止循环")
-                    break
+        return zt_df
 
-                # 获取涨停数据
-                zt_df = ak.stock_zt_pool_em(date=current_date)
+    def _load_stock_hist(self, code: str, date_str: str) -> pd.DataFrame:
+        """从本地加载指定股票和日期的历史数据"""
+        file_name = f"zt_stock_hist.csv"
+        df = self.data_mgr.load_data(file_name)
+        df['股票代码'] = df['股票代码'].astype(str).str.zfill(6)
+        df["日期"] = df["日期"].astype(str).replace('-', '', regex=True)
+        df = df[(df["日期"] == date_str) & (df["股票代码"] == code)]
 
-                # 筛选首板
-                first_zt = zt_df[zt_df['连板数'] == 1]
-                if first_zt.empty:
-                    logger.info(f"{current_date}无首板股票")
-                    current_date = self.calendar.get_next_trade_date(current_date)
-                    continue
+        return df
 
-                # 获取下一交易日
-                next_date = self.calendar.get_next_trade_date(current_date)
-                if not next_date:
-                    logger.info(f"{current_date}后无有效交易日")
-                    current_date = self.calendar.get_next_trade_date(current_date)
-                    continue
 
-                logger.debug(f"处理日期: {current_date} -> {next_date}")
-
-                # 遍历首板股票
-                for _, row in first_zt.iterrows():
-                    code = row['代码']
-                    close_price = row['最新价']
-
-                    # 跳过无效收盘价
-                    if close_price <= 0:
-                        logger.warning(f"股票{code}收盘价异常: {close_price}")
-                        continue
-
-                    try:
-                        # 获取次日K线
-                        day_kline = ak.stock_zh_a_hist(
-                            symbol=code,
-                            period="daily",
-                            start_date=next_date,
-                            end_date=next_date
-                        )
-                        if day_kline.empty:
-                            logger.warning(f"股票{code}在{next_date}无数据")
-                            continue
-
-                        # 提取开盘价
-                        open_price = day_kline.iloc[0]['开盘']
-                        open_pct = (open_price / close_price - 1) * 100
-                        premiums.append(open_pct)
-                        logger.debug(f"股票{code}溢价率: {open_pct:.2f}%")
-
-                    except Exception as e:
-                        logger.error(f"处理股票{code}失败: {str(e)}")
-
-                # 更新当前日期
-                current_date = self.calendar.get_next_trade_date(current_date)
-
-            # 计算平均溢价率
-            if not premiums:
-                logger.warning("无有效溢价率数据")
-                return 0.0
-
-            avg_premium = sum(premiums) / len(premiums)
-            logger.info(f"平均溢价率: {avg_premium:.2f}% (样本数: {len(premiums)})")
-            return round(avg_premium, 2)
-
-        except Exception as e:
-            logger.error(f"溢价分析失败: {str(e)}", exc_info=True)
-            return 0.0
-
-# 使用示例
+# ==================== 使用示例 ====================
 if __name__ == "__main__":
-
-    analyzer = MarketSentimentAnalyzer()
+    data_root = "data/csv/20250418"  # 替换为实际的数据存储路径
+    analyzer = MarketSentimentAnalyzer(data_root=data_root)
     report = analyzer.generate_report()
 
-    # print(f"最高连板数: {report['市场数据']['涨停分析']['最高连板数']}")
-    # print("连板分布:")
-    # for k, v in report['市场数据']['涨停分析']['连板分布'].items():
-    #     print(f"  {k}: {v}家")
-    #
-    # if report['市场数据']['涨停分析']['特殊涨停案例']:
-    #     print("\n📌 非连续涨停案例:")
-    #     for case in report['市场数据']['涨停分析']['特殊涨停案例']:
-    #         print(f"  - {case}")
-    #
-    # extreme_data = analyzer.detect_extreme_boards()
-    # print(f"检测到天地板：{extreme_data['sky_earth']}例，地天板：{extreme_data['earth_sky']}例")
-    # print(json.dumps(extreme_data['details'], indent=4, ensure_ascii=False))
+    print(f"\n【市场情绪报告】{report['trade_date']}")
+    print(f"综合情绪分: {report['total_score']} ({report['sentiment_level']})")
+    print("\n指数数据:")
+    for code, data in report['index_data'].items():
+        print(f"- {data['名称']}: {data['当日涨跌幅']} | {data['趋势方向']}")
 
-    premium_effect = analyzer.analyze_premium_effect()
-    print(f"近期首板次日平均溢价率: {premium_effect:.2f}%")
+    print("\n涨停分析:")
+    print(f"最高连板: {report['limit_stats']['max_limit']} 连板")
+    print(f"涨停分布: {report['limit_stats']['distribution']}")
+
+    print(f"\n二板溢价效应分析:")
+    print(f"盈利概率: {report['premium_effect']['profit_probability']:.2f}%")
+    print(f"平均收益率: {report['premium_effect']['avg_profit']:.2f}%")
+    print(f"亏损率: {report['premium_effect']['avg_loss']:.2f}% (基于 {report['premium_effect']['total_samples']} 个样本)")
+    print(f"盈利率: {report['premium_effect']['winning_profit_rate']:.2f}% (基于 {report['premium_effect']['total_samples']} 个样本)")
+
