@@ -13,7 +13,7 @@ class LocalTradeCalendar:
     本地交易日历管理（优先读取本地CSV，支持手动更新）
     包含：最近交易日/前后N交易日/区间交易日查询
     """
-    CSV_PATH = './data/sse_trading_days_2025.csv'  # 固定本地路径
+    CSV_PATH = '../code/data/sse_trading_days_2025.csv'  # 固定本地路径
     CACHE_EXAMPLE = ['2025-03-25', '2025-03-26', '2025-03-27', '2025-03-28', '2025-03-31']  # 最小可用缓存
 
     def __init__(self):
